@@ -16,7 +16,8 @@ async function main(): Promise<void> {
   const { db, sqlite } = openDatabase(config.dbPath);
   runMigrations(db);
 
-  const app = await buildApp({ db, config });
+  // 生产入口启动 janitor：过期上传会话与 refresh token 不靠人清
+  const app = await buildApp({ db, config, janitorIntervalMs: 60 * 60 * 1000 });
   await app.listen({ host: config.HOST, port: config.PORT });
 
   const shutdown = async (signal: string): Promise<void> => {

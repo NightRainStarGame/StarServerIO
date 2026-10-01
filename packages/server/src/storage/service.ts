@@ -130,17 +130,30 @@ export class StorageService {
     return { uploadId: id, chunkSize, totalChunks, expiresAt: now + UPLOAD_SESSION_TTL_MS };
   }
 
-  private loadSession(uploadId: string) {
+  /**
+   * 读取上传会话。
+   *
+   * `appId` 提供时做归属校验：别的应用的 Key 拿到你的 uploadId 后，
+   * 可以塞垃圾分片让你的 complete 永远失败（跨租户 DoS），
+   * 所以这里必须像 getFile 一样跨应用一律 404，不泄露会话是否存在。
+   */
+  private loadSession(uploadId: string, appId?: string) {
     const row = this.db.select().from(uploadSessions).where(eq(uploadSessions.id, uploadId)).get();
     if (!row) throw new AppError('NOT_FOUND', '上传会话不存在');
+    if (appId !== undefined && row.appId !== appId) throw new AppError('NOT_FOUND', '上传会话不存在');
     if (row.status !== 'pending') throw new AppError('CONFLICT', `上传会话已${row.status === 'completed' ? '完成' : '中止'}`);
     if (row.expiresAt <= Date.now()) throw new AppError('BAD_REQUEST', '上传会话已过期');
     return row;
   }
 
   /** 写入一个分片。重复写同一 index 会覆盖，并按差值修正已接收字节数。 */
-  async putChunk(uploadId: string, index: number, data: Buffer | Readable): Promise<{ uploadedChunks: number[]; receivedBytes: number }> {
-    const session = this.loadSession(uploadId);
+  async putChunk(
+    uploadId: string,
+    appId: string,
+    index: number,
+    data: Buffer | Readable,
+  ): Promise<{ uploadedChunks: number[]; receivedBytes: number }> {
+    const session = this.loadSession(uploadId, appId);
     if (!Number.isInteger(index) || index < 0 || index >= session.totalChunks) {
       throw new AppError('BAD_REQUEST', `分片下标越界（0–${session.totalChunks - 1}）`);
     }
@@ -185,8 +198,8 @@ export class StorageService {
    * 顺序流式合并（不是先拼成大文件再算 hash），保证 100 MB 文件的内存占用恒定。
    * 服务端算出的 sha256 与客户端声明值不一致时，已写入的对象会被删除并报错。
    */
-  async complete(uploadId: string, expectedSha256: string): Promise<CompleteResult> {
-    const session = this.loadSession(uploadId);
+  async complete(uploadId: string, appId: string, expectedSha256: string): Promise<CompleteResult> {
+    const session = this.loadSession(uploadId, appId);
 
     const expected = new Set(Array.from({ length: session.totalChunks }, (_, i) => i));
     const got = new Set(session.uploadedChunks);
@@ -279,9 +292,9 @@ export class StorageService {
   }
 
   /** 中止并清理。 */
-  async abort(uploadId: string): Promise<void> {
+  async abort(uploadId: string, appId: string): Promise<void> {
     const session = this.db.select().from(uploadSessions).where(eq(uploadSessions.id, uploadId)).get();
-    if (!session) throw new AppError('NOT_FOUND', '上传会话不存在');
+    if (!session || session.appId !== appId) throw new AppError('NOT_FOUND', '上传会话不存在');
     this.db.update(uploadSessions).set({ status: 'aborted' }).where(eq(uploadSessions.id, uploadId)).run();
     await this.cleanupSession(uploadId);
   }
@@ -294,23 +307,10 @@ export class StorageService {
   }
 
   /**
-   * 清理过期会话。
+   * 清理过期会话（由 app.ts 的统一 janitor 定时调用）。
    *
    * 用 setInterval 而不是引入队列中间件 —— 自托管单机场景不值得为此增加一个依赖。
-   * 定时器 unref()，避免它拖住进程退出（测试里尤其明显）。
    */
-  startJanitor(intervalMs: number = 60 * 60 * 1000): NodeJS.Timeout {
-    const timer = setInterval(() => {
-      try {
-        this.sweepExpiredSessions();
-      } catch {
-        // 清理失败不应影响主流程，下一轮再试
-      }
-    }, intervalMs);
-    timer.unref?.();
-    return timer;
-  }
-
   sweepExpiredSessions(): number {
     const expired = this.db
       .select()

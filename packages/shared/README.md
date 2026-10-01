@@ -20,6 +20,6 @@ pnpm --filter @ssio/shared build     # tsc 产出 dist（ESM + d.ts）
 
 ## 约定
 
-- 新增错误码必须同步进 `docs/03-API参考.md`（由 `pnpm gen:api-docs` 生成，禁止手写）。
+- `docs/03-API参考.md` 由脚本从路由 schema 生成（P6 落地，当前以 `packages/server/README.md` 的接口表为准），禁止手写。
 - 时间字段统一 Unix **毫秒**整数。
 - 这里只允许出现通用概念（app / user / file / release / …）。出现任何业务方字样即为越界。

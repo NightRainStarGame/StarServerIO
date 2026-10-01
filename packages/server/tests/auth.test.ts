@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AuthTokens, UserSelf } from '@ssio/shared';
+import { cleanupRefreshTokens } from '../src/modules/auth.js';
 import { createApp, createTestServer, issueKey, type TestServer } from './helpers.js';
 
 describe('用户认证链路', () => {
@@ -138,5 +139,41 @@ describe('用户认证链路', () => {
   it('无 JWT 访问 /v1/auth/me → 401', async () => {
     const res = await t.request.get('/v1/auth/me');
     expect(res.status).toBe(401);
+  });
+});
+
+describe('过期 refresh token 清理', () => {
+  it('过期与久置已吊销的行被删，30 天内吊销的保留', async () => {
+    const t = await createTestServer();
+    const app = await createApp(t.request, t.masterKey, 'token-gc');
+    const apiKey = await issueKey(t.request, t.masterKey, { appId: app.id, scopes: ['auth:read'] });
+
+    // 造三条：过期未吊销 / 刚吊销（应保留）/ 吊销超 30 天（应删）
+    await t.request
+      .post('/v1/auth/register')
+      .set('X-API-Key', apiKey)
+      .send({ username: 'gc1', password: 'password123' });
+    await t.request.post('/v1/auth/register').set('X-API-Key', apiKey).send({ username: 'gc2', password: 'password123' });
+    await t.request.post('/v1/auth/register').set('X-API-Key', apiKey).send({ username: 'gc3', password: 'password123' });
+    const ids = (t.sqlite.prepare('SELECT id FROM refresh_tokens').all() as Array<{ id: string }>).map((r) => r.id);
+    expect(ids).toHaveLength(3);
+
+    const now = Date.now();
+    const notExpired = now + 30 * 24 * 3600 * 1000;
+    // gc1：已过期未吊销 → 删
+    t.sqlite.prepare('UPDATE refresh_tokens SET expires_at = ? WHERE id = ?').run(now - 1000, ids[0]!);
+    // gc2：未过期、刚吊销 → 保留（30 天内吊销的供排查）
+    t.sqlite.prepare('UPDATE refresh_tokens SET expires_at = ?, revoked_at = ? WHERE id = ?').run(notExpired, now - 1000, ids[1]!);
+    // gc3：未过期、吊销超 30 天 → 删
+    t.sqlite
+      .prepare('UPDATE refresh_tokens SET expires_at = ?, revoked_at = ? WHERE id = ?')
+      .run(notExpired, now - 31 * 24 * 3600 * 1000, ids[2]!);
+
+    const deleted = cleanupRefreshTokens(t.db);
+    expect(deleted).toBe(2);
+
+    const left = t.sqlite.prepare('SELECT id FROM refresh_tokens').all() as Array<{ id: string }>;
+    expect(left.map((r) => r.id)).toEqual([ids[1]]);
+    t.cleanup();
   });
 });

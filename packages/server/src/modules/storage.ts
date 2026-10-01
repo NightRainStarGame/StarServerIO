@@ -91,7 +91,7 @@ export async function registerStorage(app: FastifyInstance, opts: ModuleOptions)
       const idx = Number(index);
       const chunk = req.body;
       if (!Buffer.isBuffer(chunk)) throw new AppError('BAD_REQUEST', '分片必须以 application/octet-stream 裸流上传');
-      return storage.putChunk(id, idx, chunk);
+      return storage.putChunk(id, req.ctx.appId!, idx, chunk);
     },
   );
 
@@ -114,7 +114,7 @@ export async function registerStorage(app: FastifyInstance, opts: ModuleOptions)
     async (req) => {
       const { id } = req.params as { id: string };
       const { sha256 } = req.body as { sha256: string };
-      return storage.complete(id, sha256);
+      return storage.complete(id, req.ctx.appId!, sha256);
     },
   );
 
@@ -123,7 +123,7 @@ export async function registerStorage(app: FastifyInstance, opts: ModuleOptions)
     { preHandler: [app.requireApiKey({ scopes: ['storage:write'] })] },
     async (req) => {
       const { id } = req.params as { id: string };
-      await storage.abort(id);
+      await storage.abort(id, req.ctx.appId!);
       return { aborted: true as const, uploadId: id };
     },
   );

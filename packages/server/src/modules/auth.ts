@@ -1,9 +1,9 @@
 import { Type } from '@sinclair/typebox';
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, lt, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { AppError, type AuthTokens, type IntrospectResult, type UserSelf } from '@ssio/shared';
 import { refreshTokens, users } from '../db/schema.js';
-import { newId } from '../db/client.js';
+import { newId, type Db } from '../db/client.js';
 import { writeAudit } from '../lib/audit.js';
 import { hashApiKey } from '../lib/keys.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
@@ -49,6 +49,19 @@ function toUserSelf(row: typeof users.$inferSelect): UserSelf {
     email: row.email,
     phone: row.phone,
   };
+}
+
+/**
+ * 清理 refresh token：过期的直接删，已吊销的保留 30 天（供「我这号在哪登录过」的排查）后删。
+ * 由 app.ts 的统一 janitor 定时调用。返回删除行数。
+ */
+export function cleanupRefreshTokens(db: Db): number {
+  const revokedCutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const res = db
+    .delete(refreshTokens)
+    .where(or(lt(refreshTokens.expiresAt, Date.now()), and(isNotNull(refreshTokens.revokedAt), lt(refreshTokens.revokedAt, revokedCutoff))))
+    .run();
+  return Number((res as unknown as { changes?: number }).changes ?? 0);
 }
 
 /**

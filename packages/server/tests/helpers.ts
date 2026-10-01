@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import supertest from 'supertest';
 import type { AppRecord } from '@ssio/shared';
-import { openDatabase, type Sqlite } from '../src/db/client.js';
+import { openDatabase, type Db, type Sqlite } from '../src/db/client.js';
 import { runMigrations } from '../src/db/migrate.js';
-import { configForTest } from '../src/env.js';
+import { configForTest, type ServerConfig } from '../src/env.js';
 import { buildApp } from '../src/app.js';
 
 export interface TestServer {
@@ -16,6 +16,9 @@ export interface TestServer {
   dataDir: string;
   /** 暴露裸连接，供「数据库里没有明文」这类断言直接查表。 */
   sqlite: Sqlite;
+  /** drizzle 实例：sweep / cleanupRefreshTokens 这类内部函数的测试要用。 */
+  db: Db;
+  config: ServerConfig;
   cleanup: () => void;
 }
 
@@ -48,6 +51,8 @@ export async function createTestServer(overrides: Record<string, string> = {}): 
     masterKey: config.MASTER_KEY,
     dataDir,
     sqlite,
+    db,
+    config,
     cleanup: () => {
       void app.close();
       sqlite.close();

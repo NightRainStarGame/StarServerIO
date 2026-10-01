@@ -2,6 +2,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildApp } from '../src/app.js';
 import type { TestServer } from './helpers.js';
 import { createApp, createTestServer, issueKey } from './helpers.js';
 
@@ -175,6 +176,63 @@ describe('分片上传', () => {
     const otherKey = await issueKey(t.request, t.masterKey, { appId: other.id, scopes: RW });
     const res = await t.request.get(`/v1/storage/files/${r.fileId}`).set('X-API-Key', otherKey);
     expect(res.status).toBe(404);
+  });
+
+  it('跨应用不能向别人的上传会话塞分片 / complete / abort（跨租户 DoS 防护）', async () => {
+    // 应用 A 建一个上传会话
+    const init = await t.request
+      .post('/v1/storage/uploads')
+      .set('X-API-Key', apiKey)
+      .send({ filename: 'guard.bin', totalSize: 2 * 1024 * 1024, chunkSize: 1024 * 1024 });
+    const uploadId = (init.body as { uploadId: string }).uploadId;
+
+    // 应用 B 的 Key 拿到 uploadId 后，三个操作都必须是 404，不能有任何副作用
+    const other = await createApp(t.request, t.masterKey, 'store-guard-evil');
+    const evilKey = await issueKey(t.request, t.masterKey, { appId: other.id, scopes: RW });
+
+    const put = await t.request
+      .put(`/v1/storage/uploads/${uploadId}/chunks/0`)
+      .set('X-API-Key', evilKey)
+      .set('Content-Type', 'application/octet-stream')
+      .send(randomBytes(1024 * 1024));
+    expect(put.status).toBe(404);
+
+    const complete = await t.request
+      .post(`/v1/storage/uploads/${uploadId}/complete`)
+      .set('X-API-Key', evilKey)
+      .send({ sha256: '0'.repeat(64) });
+    expect(complete.status).toBe(404);
+
+    const abort = await t.request.delete(`/v1/storage/uploads/${uploadId}`).set('X-API-Key', evilKey);
+    expect(abort.status).toBe(404);
+
+    // A 自己的会话不受影响，仍可正常续传
+    const mine = await t.request
+      .put(`/v1/storage/uploads/${uploadId}/chunks/0`)
+      .set('X-API-Key', apiKey)
+      .set('Content-Type', 'application/octet-stream')
+      .send(randomBytes(1024 * 1024));
+    expect(mine.status).toBe(200);
+  });
+
+  it('buildApp 传 janitorIntervalMs 后启动即清理过期会话', async () => {
+    const app = await createApp(t.request, t.masterKey, 'store-janitor');
+    const key = await issueKey(t.request, t.masterKey, { appId: app.id, scopes: RW });
+    const init = await t.request
+      .post('/v1/storage/uploads')
+      .set('X-API-Key', key)
+      .send({ filename: 'stale.bin', totalSize: 1024 * 1024 });
+    const uploadId = (init.body as { uploadId: string }).uploadId;
+
+    // 把会话改成已过期，然后重建一个带 janitor 的实例 —— 启动即扫（sweep 同步执行）
+    t.sqlite
+      .prepare('UPDATE upload_sessions SET expires_at = ? WHERE id = ?')
+      .run(Date.now() - 1000, uploadId);
+    const app2 = await buildApp({ db: t.db, config: t.config, janitorIntervalMs: 999_999_999_999 });
+    await app2.close();
+
+    const row = t.sqlite.prepare('SELECT status FROM upload_sessions WHERE id = ?').get(uploadId) as { status: string };
+    expect(row.status).toBe('aborted');
   });
 });
 

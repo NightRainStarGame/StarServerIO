@@ -10,7 +10,7 @@ import { registerAuth } from './plugins/auth.js';
 import { registerHealth } from './modules/health.js';
 import { registerApps } from './modules/apps.js';
 import { registerApiKeys } from './modules/apikeys.js';
-import { registerAuth as registerAuthRoutes } from './modules/auth.js';
+import { registerAuth as registerAuthRoutes, cleanupRefreshTokens } from './modules/auth.js';
 import { registerUsers } from './modules/users.js';
 import { registerStorage } from './modules/storage.js';
 import { registerReleases } from './modules/releases.js';
@@ -26,6 +26,11 @@ export interface BuildAppOptions {
   config: ServerConfig;
   /** 注入自定义驱动（测试用）。缺省时使用本地文件系统驱动。 */
   driver?: StorageDriver;
+  /**
+   * 启动轻量定时清理（过期上传会话 + 过期/已吊销 refresh token）。
+   * 生产入口（index.ts）应提供；测试不提供，避免每个用例都挂一个定时器。
+   */
+  janitorIntervalMs?: number;
 }
 
 /**
@@ -74,6 +79,28 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
     await registerCards(instance, moduleOpts);
     await registerAnnouncements(instance, moduleOpts);
   });
+
+  if (opts.janitorIntervalMs !== undefined) {
+    const sweep = (): void => {
+      // 单项失败不影响另一项，下一轮再试
+      try {
+        storage.sweepExpiredSessions();
+      } catch {
+        /* noop */
+      }
+      try {
+        cleanupRefreshTokens(db);
+      } catch {
+        /* noop */
+      }
+    };
+    sweep(); // 启动即清一次
+    const timer = setInterval(sweep, opts.janitorIntervalMs);
+    timer.unref?.();
+    app.addHook('onClose', async () => {
+      clearInterval(timer);
+    });
+  }
 
   await app.ready();
   return app;

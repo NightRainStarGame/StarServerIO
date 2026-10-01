@@ -14,7 +14,6 @@ export const SCOPES = [
   'forum:read',
   'forum:write',
   'cards:redeem',
-  'cards:write',
   'source:read',
   'source:write',
   'announcements:read',
