@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一分支上的新推送会取消掉仍在跑的旧任务，省 Actions 分钟数
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # --ignore-scripts：跳过所有安装脚本，避免本机装不上的原生模块拖垮安装。
+      # 再单独 rebuild 真正需要构建产物的两个包（CI 上能正常拿到预编译二进制）。
+      # 注意：根目录 pnpm.onlyBuiltDependencies 只列了 esbuild，
+      # better-sqlite3 在开发者本机是手工放预编译产物的，所以这里显式补上。
+      - name: Install
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Rebuild native deps
+        run: pnpm rebuild esbuild better-sqlite3
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      - name: Lint
+        run: pnpm lint
