@@ -91,4 +91,9 @@ pnpm db:generate  # drizzle-kit 生成迁移（禁止手写 CREATE TABLE）
 
 ## 环境提醒
 
-仓库位于 D 盘（USB 外接盘，有 Event 51 分页错误记录）。**每天收工前**请 `git push`，或同步一份到内置盘。
+- 仓库位于 D 盘（USB 外接盘，有 Event 51 分页错误记录）。**每天收工前**请 `git push`，或同步一份到内置盘。
+- 若 `git push` 报 `Failed to connect to github.com:443`：多半是本机 hosts 被第三方加速工具劫持（把 `*.github.com` 指到 127.0.0.1），而配套的本地反代没在运行。此时改走 SSH 通道即可：
+
+  ```bash
+  git -c url."git@ssh.github.com:".insteadOf="https://github.com/" push origin main
+  ```
