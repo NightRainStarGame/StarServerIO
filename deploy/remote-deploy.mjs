@@ -119,27 +119,65 @@ try {
   await sh(`cd ${remoteDir} && pnpm --filter @ssio/shared --filter @ssio/server build`, { timeout: 300000 });
   await sh(`cd ${remoteDir} && pnpm rebuild better-sqlite3`, { timeout: 180000 });
 
+  // better-sqlite3 在国内服务器上几乎必然装不上：install 脚本要从 GitHub 拉预编译包
+  // （不通），回退编译又要从 nodejs.org 下 headers（也不通）。兜底：直接从
+  // npmmirror 的二进制镜像取对应 ABI 的 tarball，解压到包目录即可，不用编译。
+  console.log('      校验 better-sqlite3 原生模块');
+  let bs3 = (await sh(`find ${remoteDir}/node_modules/.pnpm -maxdepth 8 -path '*better-sqlite3*/build/Release/better_sqlite3.node' | head -1`, { quiet: true })).trim();
+  if (!bs3) {
+    const dir = (await sh(`find ${remoteDir}/node_modules/.pnpm -maxdepth 1 -type d -name 'better-sqlite3@*' | head -1`, { quiet: true })).trim();
+    const ver = dir.includes('@') ? dir.split('@').pop() : '11.10.0';
+    const abi = (await sh('node -p "process.versions.modules"', { quiet: true })).trim() || '127';
+    const pkgDir = `${dir}/node_modules/better-sqlite3`;
+    const url = `https://registry.npmmirror.com/-/binary/better-sqlite3/v${ver}/better-sqlite3-v${ver}-node-v${abi}-linux-x64.tar.gz`;
+    console.log(`      rebuild 没产出二进制，改从镜像下载（v${ver} / ABI ${abi}）`);
+    await sh(
+      `curl -fsSL -m 120 -o /tmp/bs3.tar.gz ${url} && mkdir -p ${pkgDir}/build/Release && ` +
+        `tar -xzf /tmp/bs3.tar.gz -C ${pkgDir} && echo ok || echo failed`,
+      { timeout: 180000 },
+    );
+    bs3 = (await sh(`find ${remoteDir}/node_modules/.pnpm -maxdepth 8 -path '*better-sqlite3*/build/Release/better_sqlite3.node' | head -1`, { quiet: true })).trim();
+  }
+  if (!bs3) {
+    console.log('      [严重] better-sqlite3 二进制仍未就位 —— 服务会起不来，需要手工处理');
+  } else {
+    console.log(`      原生模块就位：${bs3.replace(remoteDir, '.')}`);
+  }
+
   // ---------- 6. 配置 + 起服务 ----------
   console.log('[6/7] 生成 .env 并启动服务');
-  const envExists = await sh(`test -f ${remoteDir}/.env && echo yes || echo no`, { quiet: true });
-  let masterKey = '(已存在 .env，未改动)';
+  // 注：这里**不能用 heredoc** —— 多行内容经 `bash -c` 传递时换行会被吃掉（实测：
+  // 整段被拼成一行，写出来的 unit 全是错的）。改用 base64 单行传输。
+  const envExists = await sh(`grep -q '^MASTER_KEY=' ${remoteDir}/.env 2>/dev/null && echo yes || echo no`, { quiet: true });
+  let masterKey = '(已存在有效 .env，未改动)';
   if (!envExists.includes('yes')) {
     const { randomBytes } = await import('node:crypto');
     const jwt = randomBytes(32).toString('hex');
     masterKey = randomBytes(16).toString('hex');
-    await sh(
-      `cat > ${remoteDir}/.env <<EOF\n` +
-        `JWT_SECRET=${jwt}\n` +
-        `MASTER_KEY=${masterKey}\n` +
-        `DATA_DIR=${remoteDir}/data\n` +
-        `HOST=0.0.0.0\n` +
-        `PORT=${ssioPort}\n` +
-        `LOG_LEVEL=info\n` +
-        `RATE_LIMIT_MAX=600\n` +
-        `EOF`,
+    await writeRemote(
+      `${remoteDir}/.env`,
+      [
+        `JWT_SECRET=${jwt}`,
+        `MASTER_KEY=${masterKey}`,
+        `DATA_DIR=${remoteDir}/data`,
+        `HOST=0.0.0.0`,
+        `PORT=${ssioPort}`,
+        `LOG_LEVEL=info`,
+        `RATE_LIMIT_MAX=600`,
+        '',
+      ].join('\n'),
+      { sudo: false, owner: user },
     );
   }
 
+  // 数据目录必须先存在：systemd 的 ReadWritePaths 指向不存在的目录时，
+  // 服务会在 NAMESPACE 阶段直接失败（status=226/NAMESPACE），然后无限重启
+  await sh(`mkdir -p ${remoteDir}/data && sudo chown ${user}:${user} ${remoteDir}/data`);
+
+  // node 的实际路径因发行版/安装方式而异（/usr/bin/node、/usr/local/bin/node…），
+  // systemd 里写死路径会起不来 —— 这里按服务器实际情况取
+  const nodeBin = (await sh('command -v node || which node', { quiet: true })).trim().split('\n')[0] || '/usr/bin/node';
+  console.log(`      node: ${nodeBin}`);
   if (useService) {
     const unit = `[Unit]
 Description=SSIO self-hosted BaaS
@@ -150,7 +188,7 @@ Type=simple
 User=${user}
 WorkingDirectory=${remoteDir}
 EnvironmentFile=${remoteDir}/.env
-ExecStart=/usr/local/bin/node packages/server/dist/index.js
+ExecStart=${nodeBin} packages/server/dist/index.js
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
@@ -163,8 +201,12 @@ SyslogIdentifier=ssio
 [Install]
 WantedBy=multi-user.target
 `;
-    await sh(`cat > /etc/systemd/system/ssio.service <<'EOF'\n${unit}EOF`, { sudo: true });
-    await sh('systemctl daemon-reload && systemctl enable ssio && systemctl restart ssio', { sudo: true });
+    await writeRemote('/etc/systemd/system/ssio.service', unit, { sudo: true, mode: '644' });
+    // unmask：上一轮写坏的文件可能让 systemd 把它判为 masked，不解开就装不上
+    await sh(
+      'systemctl unmask ssio.service; systemctl daemon-reload && systemctl enable ssio && systemctl restart ssio',
+      { sudo: true },
+    );
   } else {
     await sh(`cd ${remoteDir} && (nohup node packages/server/dist/index.js > ssio.log 2>&1 &) ; sleep 3; echo started`);
   }
@@ -215,6 +257,24 @@ function sh(cmd, opts = {}) {
       }, timeout);
     });
   });
+}
+
+/**
+ * 写远端文件：内容 base64 编码后单行传输，绕开 heredoc 在多行/引号/特殊字符上的所有坑。
+ * 带 sudo 时用 tee（避免重定向权限问题）。
+ */
+function writeRemote(path, content, opts = {}) {
+  const { sudo = false, mode, owner } = opts;
+  const b64 = Buffer.from(content, 'utf8').toString('base64');
+  const cmd = sudo
+    ? `echo '${b64}' | base64 -d | sudo tee ${JSON.stringify(path)} > /dev/null`
+    : `echo '${b64}' | base64 -d > ${JSON.stringify(path)}`;
+  return sh(cmd, {}).then(() =>
+    Promise.all([
+      mode ? sh(`sudo chmod ${mode} ${JSON.stringify(path)}`, {}) : null,
+      owner ? sh(`sudo chown ${owner}:${owner} ${JSON.stringify(path)}`, {}) : null,
+    ].filter(Boolean)),
+  );
 }
 
 function sftpUpload(conn, local, remote) {
