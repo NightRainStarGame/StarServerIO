@@ -16,6 +16,8 @@ import { registerStorage } from './modules/storage.js';
 import { registerReleases } from './modules/releases.js';
 import { registerCards } from './modules/cards.js';
 import { registerAnnouncements } from './modules/announcements.js';
+import { registerForum } from './modules/forum.js';
+import { registerRegistry } from './modules/registry.js';
 import { LocalDriver } from './storage/local.js';
 import { StorageService } from './storage/service.js';
 import type { StorageDriver } from './storage/driver.js';
@@ -78,6 +80,8 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
     await registerReleases(instance, moduleOpts);
     await registerCards(instance, moduleOpts);
     await registerAnnouncements(instance, moduleOpts);
+    await registerForum(instance, moduleOpts);
+    await registerRegistry(instance, moduleOpts);
   });
 
   if (opts.janitorIntervalMs !== undefined) {

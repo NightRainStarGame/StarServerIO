@@ -249,3 +249,102 @@ export const announcements = sqliteTable(
   },
   (t) => [index('idx_announcements_app').on(t.appId, t.startAt)],
 );
+
+/* ---------------- P3：论坛 ---------------- */
+
+export const forumBoards = sqliteTable(
+  'forum_boards',
+  {
+    id: text('id').primaryKey(),
+    appId: text('app_id').notNull(),
+    slug: text('slug').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    /** 0 = 普通，数字越大越靠前（置顶板块）。 */
+    sortOrder: integer('sort_order', { mode: 'number' }).notNull().default(0),
+    threadCount: integer('thread_count', { mode: 'number' }).notNull().default(0),
+    createdAt: integer('created_at', { mode: 'number' }).notNull(),
+  },
+  // 同一应用下 slug 唯一：客户端按 slug 取板块，不暴露内部 id
+  (t) => [uniqueIndex('uq_forum_boards_slug').on(t.appId, t.slug), index('idx_forum_boards_app').on(t.appId)],
+);
+
+export const forumThreads = sqliteTable(
+  'forum_threads',
+  {
+    id: text('id').primaryKey(),
+    appId: text('app_id').notNull(),
+    boardId: text('board_id').notNull(),
+    title: text('title').notNull(),
+    authorId: text('author_id').notNull(),
+    contentMd: text('content_md').notNull(),
+    pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+    /** 锁帖后禁止回复（但保留内容）。 */
+    locked: integer('locked', { mode: 'boolean' }).notNull().default(false),
+    replyCount: integer('reply_count', { mode: 'number' }).notNull().default(0),
+    viewCount: integer('view_count', { mode: 'number' }).notNull().default(0),
+    lastReplyAt: integer('last_reply_at', { mode: 'number' }),
+    createdAt: integer('created_at', { mode: 'number' }).notNull(),
+  },
+  // 列表默认按「置顶优先 + 最后回复倒序」，这两个字段必须能命中索引
+  (t) => [
+    index('idx_forum_threads_board').on(t.boardId, t.pinned, t.lastReplyAt),
+    index('idx_forum_threads_app').on(t.appId, t.createdAt),
+  ],
+);
+
+export const forumPosts = sqliteTable(
+  'forum_posts',
+  {
+    id: text('id').primaryKey(),
+    appId: text('app_id').notNull(),
+    threadId: text('thread_id').notNull(),
+    authorId: text('author_id').notNull(),
+    contentMd: text('content_md').notNull(),
+    /** 楼层号（同一帖内自增，从 1 开始），用于客户端分页与引用。 */
+    floor: integer('floor', { mode: 'number' }).notNull(),
+    createdAt: integer('created_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [uniqueIndex('uq_forum_posts_floor').on(t.threadId, t.floor), index('idx_forum_posts_thread').on(t.threadId, t.createdAt)],
+);
+
+/* ---------------- P3：软件源 ---------------- */
+
+export const registryPackages = sqliteTable(
+  'registry_packages',
+  {
+    id: text('id').primaryKey(),
+    appId: text('app_id').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    /** 冗余最新版本号：列表页不想 join versions 表。 */
+    latestVersion: text('latest_version'),
+    downloadCount: integer('download_count', { mode: 'number' }).notNull().default(0),
+    createdAt: integer('created_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [uniqueIndex('uq_registry_packages_name').on(t.appId, t.name), index('idx_registry_packages_app').on(t.appId)],
+);
+
+export const registryVersions = sqliteTable(
+  'registry_versions',
+  {
+    id: text('id').primaryKey(),
+    appId: text('app_id').notNull(),
+    packageId: text('package_id').notNull(),
+    version: text('version').notNull(),
+    channel: text('channel').$type<'stable' | 'beta' | 'alpha'>().notNull().default('stable'),
+    /** 复用存储模块：包体就是 storage 里的一个对象。 */
+    fileId: text('file_id').notNull(),
+    sizeBytes: integer('size_bytes', { mode: 'number' }).notNull(),
+    sha256: text('sha256').notNull(),
+    /** 包元数据（依赖、入口、平台约束等），由发布方自定义。 */
+    meta: text('meta', { mode: 'json' }).$type<Record<string, unknown>>(),
+    downloadCount: integer('download_count', { mode: 'number' }).notNull().default(0),
+    createdAt: integer('created_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    // 同名同版本只能有一份：重复发布会撞这个索引（而不是静默覆盖）
+    uniqueIndex('uq_registry_versions').on(t.packageId, t.version),
+    index('idx_registry_versions_pkg').on(t.packageId, t.createdAt),
+  ],
+);

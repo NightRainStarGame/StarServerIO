@@ -6,7 +6,7 @@
 
 单体仓库（pnpm workspace），Node 22 + TypeScript，服务端 Fastify 5 + Drizzle ORM(SQLite)。
 
-> 当前阶段：**P1 骨架 + P2 核心能力 + P4 客户端 SDK + P5 控制台与 CLI + P6 打包部署已完成**（P8 只差持续运维项：仓库与 CI 已就位）。P3 论坛/软件源、P7 Capacitor、P9 TaskManager 集成未开工。
+> 当前阶段：**P1 骨架 + P2 核心能力 + P3 论坛与软件源 + P4 客户端 SDK + P5 控制台与 CLI + P6 打包部署已完成**（P8 只差持续运维项：仓库与 CI 已就位）。P7 Capacitor、P9 TaskManager 集成未开工。
 >
 > SDK 一览（esbuild bundle + minify + gzip，`pnpm sdk:size` 复测）：
 >
@@ -142,6 +142,26 @@ docker compose up -d      # 数据落在命名卷 ssio-data
 3. **契约变更需报告**：`packages/shared/src/api.ts` 的字段改动会波及所有消费方。
 4. **密钥不落库**：APIKey 只存 sha256，明文仅在签发响应里出现一次。
 
+## 论坛与软件源
+
+**论坛**（`/v1/forum/*`）：板块 → 帖子 → 回复三层。权限划分是它的核心语义：
+
+| 操作 | 谁能做 | 为什么 |
+|---|---|---|
+| 浏览板块/帖子/回复 | APIKey（`forum:read`）或用户 JWT | 业务服务端要能聚合展示，用户要能浏览 |
+| **发帖 / 回复** | **必须是用户 JWT** | APIKey 代表应用而非人，拿它发帖会分不清「用户说的」和「应用说的」， moderation 也会失去依据 |
+| 建板块 / 置顶 / 锁帖 | APIKey（`forum:write`） | 用户不能给自己置顶 |
+
+帖子与板块计数在同一个事务里更新；楼层号由 `replyCount` 推导，天然连续。
+
+**软件源**（`/v1/registry/*`）：`name + version + 元数据` 的通用包分发，与「发行」的区别要分清：
+
+- `releases` 面向**应用更新**：有 platform/arch/灰度/minVersion，客户端拿它决定"要不要升"
+- `registry` 面向**包管理**：不认识平台、不做灰度，消费方自己解释 `meta` 字段（npm 式依赖、插件包、资源包都行）
+
+包体不单独存：复用 storage，`fileId` 指过去即可 —— 配额、秒传、签名下载全部白拿。
+版本**不可覆盖**（重复发同版本 → 409），`latest` 只按 semver 前进（回滚发布不会把 latest 拉回去）。
+
 ## 路线图
 
 | 阶段 | 内容 | 状态 |
@@ -151,7 +171,7 @@ docker compose up -d      # 数据落在命名卷 ssio-data
 | P4 | 客户端 SDK：core / web / node（含 Electron 更新执行器） | 完成 |
 | P5 | 控制台与 CLI | 完成 |
 | P6 | 打包与部署：Docker / systemd / Windows 服务、备份恢复、API 文档生成 | 完成 |
-| P3 | 论坛与软件源 | 待开工 |
+| P3 | 论坛与软件源 | 完成 |
 | P7 | Capacitor 移动端壳 | 待开工 |
 | P8 | GitHub 仓库与 CI | 进行中 |
 | P9 | TaskManager 集成（首个消费方） | 待开工 |

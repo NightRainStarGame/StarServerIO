@@ -211,6 +211,8 @@ export async function registerStorage(app: FastifyInstance, opts: ModuleOptions)
   );
 
   // 签名下载端点：只认 URL 签名，不认 APIKey（签名 URL 会给到浏览器/更新器）
+  // 注意 `*` 是 find-my-way 的「匹配剩余全部」（含斜杠），而 `**` 会被判为非法
+  // （Wildcard must be the last character）。storageKey 是多层的，靠这条规则兜住。
   app.get('/v1/storage/raw/*', async (req, reply) => {
     const key = (req.params as { '*': string })['*'];
     const { exp, sig } = req.query as { exp?: string; sig?: string };

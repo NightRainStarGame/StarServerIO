@@ -58,6 +58,8 @@ const AUTH_PATTERNS = [
   [/requireMasterOrAdmin\(\)/, () => 'Master Key 或 APIKey（admin:*）'],
   [/requireRedeemCaller\(\)/, () => 'APIKey（cards:redeem）或用户 JWT'],
   [/requireReader\(\)/, () => 'APIKey（announcements:read）或用户 JWT'],
+  // 论坛发帖/回复只认用户身份：APIKey 代表应用，拿它发帖会分不清「谁说的」
+  [/requireAuthor\(\)/, () => '用户 JWT（必须）'],
   [/requireUser\(\)/, () => '用户 JWT'],
   [/requireMaster\(\)/, () => 'Master Key'],
 ];

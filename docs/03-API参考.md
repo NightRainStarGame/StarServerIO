@@ -1,7 +1,7 @@
 # SSIO API 参考
 
 > 本文件由 `pnpm gen:api-docs` 从 `packages/server/src/modules/*.ts` **自动生成**，不要手改。
-> 生成时间：2026-10-01T09:19:25.181Z | 路由总数：43
+> 生成时间：2026-10-01T10:30:10.937Z | 路由总数：57
 
 鉴权头：Master Key 用 `X-Master-Key`，APIKey 用 `X-API-Key`，用户用 `Authorization: Bearer <access>`。
 
@@ -54,12 +54,36 @@
 | POST | `/v1/cards/redeem` | APIKey（cards:redeem）或用户 JWT |
 | GET | `/v1/cards/:codeMask/status` | APIKey（cards:redeem） |
 
+## forum（forum.ts）
+
+| 方法 | 路径 | 鉴权 |
+|---|---|---|
+| POST | `/v1/forum/boards` | APIKey（forum:write） |
+| GET | `/v1/forum/boards` | APIKey（announcements:read）或用户 JWT |
+| POST | `/v1/forum/boards/:slug/threads` | 用户 JWT（必须） |
+| GET | `/v1/forum/boards/:slug/threads` | APIKey（announcements:read）或用户 JWT |
+| GET | `/v1/forum/threads/:id` | APIKey（announcements:read）或用户 JWT |
+| PATCH | `/v1/forum/threads/:id` | APIKey（forum:write） |
+| POST | `/v1/forum/threads/:id/posts` | 用户 JWT（必须） |
+| GET | `/v1/forum/threads/:id/posts` | APIKey（announcements:read）或用户 JWT |
+
 ## 健康检查（health.ts）
 
 | 方法 | 路径 | 鉴权 |
 |---|---|---|
 | GET | `/v1/healthz` | 公开 |
 | GET | `/v1/readyz` | 公开 |
+
+## registry（registry.ts）
+
+| 方法 | 路径 | 鉴权 |
+|---|---|---|
+| POST | `/v1/registry/packages` | APIKey（source:write） |
+| GET | `/v1/registry/packages` | APIKey（source:read） |
+| GET | `/v1/registry/packages/:name` | APIKey（source:read） |
+| POST | `/v1/registry/packages/:name/versions` | APIKey（source:write） |
+| GET | `/v1/registry/packages/:name/latest` | APIKey（source:read） |
+| POST | `/v1/registry/packages/:name/:version/download` | APIKey（source:read） |
 
 ## 发行（releases.ts）
 

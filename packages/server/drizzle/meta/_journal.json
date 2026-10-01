@@ -15,6 +15,13 @@
       "when": 1790833597169,
       "tag": "0001_material_steel_serpent",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790850119005,
+      "tag": "0002_organic_vulture",
+      "breakpoints": true
     }
   ]
 }
