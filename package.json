@@ -20,7 +20,10 @@
     "gen:api-docs": "node scripts/gen-api-docs.mjs",
     "docs:check": "node scripts/gen-api-docs.mjs --check",
     "backup": "node packages/server/scripts/backup.mjs",
-    "restore": "node packages/server/scripts/restore.mjs"
+    "restore": "node packages/server/scripts/restore.mjs",
+    "console:dev": "pnpm --filter @ssio/console dev",
+    "console:build": "pnpm --filter @ssio/console build",
+    "cli": "node packages/cli/dist/index.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

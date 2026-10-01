@@ -6,7 +6,7 @@
 
 单体仓库（pnpm workspace），Node 22 + TypeScript，服务端 Fastify 5 + Drizzle ORM(SQLite)。
 
-> 当前阶段：**P1 骨架 + P2 核心能力 + P4 客户端 SDK + P6 打包部署已完成**（P8 只差持续运维项：仓库与 CI 已就位）。P3 论坛/软件源、P5 控制台/CLI、P7 Capacitor、P9 TaskManager 集成未开工。
+> 当前阶段：**P1 骨架 + P2 核心能力 + P4 客户端 SDK + P5 控制台与 CLI + P6 打包部署已完成**（P8 只差持续运维项：仓库与 CI 已就位）。P3 论坛/软件源、P7 Capacitor、P9 TaskManager 集成未开工。
 >
 > SDK 一览（esbuild bundle + minify + gzip，`pnpm sdk:size` 复测）：
 >
@@ -44,6 +44,8 @@ packages/
   core/     @ssio/core     SDK 传输层（环境无关）
   web/      @ssio/web      浏览器 SDK（React hooks 在 ./react 子路径）
   node/     @ssio/node     Node/Electron SDK（下载/校验/updater）
+  cli/      @ssio/cli      ssio 命令行运维（建应用/发版/发卡/发公告）
+console/         管理控制台（React + Vite，Master Key 登录）
 examples/
   web-min/        浏览器最小接入（import map + 静态服务）
   electron-min/   Electron 更新演示（服务端内嵌为独立 node 子进程）
@@ -61,7 +63,7 @@ docs/
   04-部署运维.md   三种部署方式 + 备份恢复 + 运维清单
 ```
 
-后续会依次加入 `console/`、`cli/` 等包（P5）。
+（P5 的 `console/` 与 `cli/` 已就位，无后续包计划。）
 
 ## 鉴权模型（三通道）
 
@@ -95,7 +97,33 @@ pnpm gen:api-docs # 从源码重新生成 docs/03-API参考.md（改了路由就
 pnpm docs:check   # 校验文档没漂移，CI 会跑
 pnpm backup       # 备份数据（VACUUM INTO 一致性快照，不用停服务）
 pnpm restore      # 恢复（默认拒绝覆盖，需 --from <备份目录> [--force]）
+pnpm console:dev  # 起管理控制台（localhost:5173，需先起服务端）
+pnpm cli -- release publish --app myapp --version 1.0.0 --file ./Setup.exe
 ```
+
+## 控制台与 CLI
+
+**CLI**（`@ssio/cli`，命令 `ssio`）用于脚本化运维，8 项端到端测试覆盖：
+
+```bash
+ssio config set --url http://127.0.0.1:8100 --master-key <key>   # 写 ~/.ssio/config.json（0600）
+ssio app create myapp --name "我的应用"
+ssio key issue --app myapp --scopes release:write,release:read,storage:write   # 签发后自动写入配置
+ssio release publish --app myapp --version 1.0.0 --file ./Setup.exe
+ssio release list --app myapp
+ssio card batch --app myapp --total 100 --days 30    # 输出一次性导出链接
+ssio announce post --app myapp --title "停服维护" --content-md "..." --pinned
+ssio quota --app myapp
+```
+
+所有命令支持 `--json`；环境变量 `SSIO_URL` / `SSIO_MASTER_KEY` / `SSIO_CONFIG` 优先于配置文件。
+
+**控制台**（`console/`，React + Vite）用于人工操作：Master Key 登录 → 应用列表 →
+版本（发布/下架/调灰度）、卡密（生成 + 一次性导出链接）、公告、APIKey（签发/吊销）。
+业务数据需要 APIKey，控制台会引导签发一个「会话 Key」存在浏览器本地。
+
+> CLI 里 `--platform` 的合法值是 `win | linux | android | any`（**不是** Electron 的 `win32`）；
+> `--arch` 同理。查询 `latest` 时不传 arch 会按 `any` 匹配，客户端应传自身架构。
 
 ## 部署
 
@@ -121,9 +149,9 @@ docker compose up -d      # 数据落在命名卷 ssio-data
 | P1 | 服务端骨架：monorepo、认证、应用与 APIKey 管理 | 完成 |
 | P2 | 核心能力：版本发行、分片存储、发卡、公告 | 完成 |
 | P4 | 客户端 SDK：core / web / node（含 Electron 更新执行器） | 完成 |
+| P5 | 控制台与 CLI | 完成 |
 | P6 | 打包与部署：Docker / systemd / Windows 服务、备份恢复、API 文档生成 | 完成 |
 | P3 | 论坛与软件源 | 待开工 |
-| P5 | 控制台与 CLI | 待开工 |
 | P7 | Capacitor 移动端壳 | 待开工 |
 | P8 | GitHub 仓库与 CI | 进行中 |
 | P9 | TaskManager 集成（首个消费方） | 待开工 |

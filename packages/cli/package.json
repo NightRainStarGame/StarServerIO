@@ -1,0 +1,32 @@
+{
+  "name": "@ssio/cli",
+  "version": "0.1.0",
+  "description": "SSIO 命令行运维：建应用 / 签发 Key / 发布版本 / 发卡 / 发公告 / 查配额",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "ssio": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ssio/core": "workspace:*",
+    "@ssio/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@ssio/server": "workspace:*",
+    "supertest": "^7.1.0",
+    "vitest": "^3.2.4"
+  }
+}
