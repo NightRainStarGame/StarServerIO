@@ -170,8 +170,7 @@ function NewsTab({ client, say }: { client: SsioClient; say: (s: string) => void
       .active()
       .then((list) => setItems(list as typeof items))
       .catch((e: unknown) => say(`拉取失败：${e instanceof Error ? e.message : String(e)}`));
-    // client 每次渲染都是新对象，这里只在挂载时拉一次
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 只在挂载时拉一次：client 每次渲染都是新对象，放进依赖数组会无限循环
   }, []);
 
   return (
