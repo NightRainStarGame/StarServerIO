@@ -87,13 +87,29 @@ S3Driver 应直接返回预签名 URL —— 那时 `raw` 端点可以整体下�
 
 ## 实测数据（本机 Windows 11 / Node 22 / 内置 NVMe）
 
+服务端跑在**独立进程**（客户端另起），数字可以归因到服务端：
+
 | 场景 | 结果 |
 |---|---|
-| 100 MB 分片上传（25 × 4 MB） | ~745 ms，吞吐 ~135 MB/s |
-| 同上，进程峰值 `heapUsed` | ~35 MB（流式合并，文件不进 JS 堆） |
+| 100 MB 分片上传（25 × 4 MB） | 上传 433 ms + 合并校验 302 ms = **端到端 ~735 ms** |
+| 服务端进程 RSS | 基线 ~95 MB → 峰值 ~131 MB，**增量 ~37 MB** |
+| 服务端进程 `heapUsed` 峰值 | ~21 MB（流式合并，文件内容不进 JS 堆） |
+| 服务端进程 `external` 峰值 | ~51 MB（分片读写缓冲，随 `chunkSize` 变化） |
 | 生成 10000 张卡密并落库 | ~430 ms（远低于 5 s 上限） |
 
-跑一遍全链路：`pnpm build && pnpm example:e2e`（`examples/node-e2e.ts`，起真实服务 + 打真实 HTTP）。
+复跑：
+
+```bash
+pnpm build && node scripts/bench/bench-100mb.mjs      # 可用 BENCH_CHUNKS / BENCH_CHUNK_SIZE 调参
+pnpm build && pnpm example:e2e                        # 全链路（examples/node-e2e.ts）
+```
+
+**轻量云 2C2G 能不能扛**：能。内存不是瓶颈（单路 100 MB 只增 ~37 MB，且 `heapUsed` 仅 21 MB）；
+真正的瓶颈是 CPU —— 合并 + sha256 约 300 ms/100 MB 且是单核活，2 核大约并发 4 路就吃满。
+并发上来后优先把 `chunkSize` 降到 1 MB（`external` 缓冲预期按比例下降，尚未实测），并把并发数限制在 4–8。
+
+> 注意：vitest 里那个 100 MB 用例的 RSS 数字偏高（~287 MB），因为客户端与服务端同进程，
+> 客户端自己持有的 100 MB 也算进去了。要看服务端自身开销请用上面的 bench 脚本。
 
 ## 怎么测
 
