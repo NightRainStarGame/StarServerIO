@@ -1,5 +1,6 @@
 // 独立服务端进程：起真实 SSIO，定期把自身内存打到 stdout 供父进程采样。
 // 与被测对象分离是关键 —— 同进程测量会把客户端持有的 100MB 也算进 RSS。
+/* eslint-disable no-console */
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

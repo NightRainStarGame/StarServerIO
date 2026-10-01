@@ -7,6 +7,7 @@
  * 为什么不用 vitest 里那个用例的数字：那里客户端与服务端同进程，
  * 客户端自己持有的 100 MB 会混进 RSS，读出来偏高且不可归因。
  */
+/* eslint-disable no-console */
 import { spawn } from 'node:child_process';
 import { randomBytes, createHash } from 'node:crypto';
 import { dirname } from 'node:path';
