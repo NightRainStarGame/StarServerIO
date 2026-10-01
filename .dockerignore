@@ -1,0 +1,16 @@
+# 构建上下文里不需要的东西：装依赖和编译都在镜像里做，本地产物不进镜像
+node_modules
+**/node_modules
+**/dist
+**/data
+**/backups
+.git
+.github
+examples
+scripts/bench
+*.log
+.env
+.env.*
+!.env.example
+tmp
+.reports

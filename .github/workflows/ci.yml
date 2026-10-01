@@ -45,5 +45,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # 文档是从源码提取的，路由改了没重新生成就报警（防手写文档漂移）
+      - name: API docs up to date
+        run: pnpm docs:check
+
       - name: Lint
         run: pnpm lint

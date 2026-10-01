@@ -16,7 +16,11 @@
     "lint": "eslint . --max-warnings 0",
     "db:generate": "pnpm --filter @ssio/server db:generate",
     "example:e2e": "node --experimental-strip-types examples/node-e2e.ts",
-    "sdk:size": "node scripts/bundle-size.mjs"
+    "sdk:size": "node scripts/bundle-size.mjs",
+    "gen:api-docs": "node scripts/gen-api-docs.mjs",
+    "docs:check": "node scripts/gen-api-docs.mjs --check",
+    "backup": "node packages/server/scripts/backup.mjs",
+    "restore": "node packages/server/scripts/restore.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

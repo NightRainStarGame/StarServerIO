@@ -6,7 +6,7 @@
 
 单体仓库（pnpm workspace），Node 22 + TypeScript，服务端 Fastify 5 + Drizzle ORM(SQLite)。
 
-> 当前阶段：**P1 骨架 + P2 核心能力 + P4 客户端 SDK 已完成**（P8 只差持续运维项：仓库与 CI 已就位）。P3 论坛/软件源、P5 控制台/CLI、P6 打包部署、P7 Capacitor、P9 TaskManager 集成未开工。
+> 当前阶段：**P1 骨架 + P2 核心能力 + P4 客户端 SDK + P6 打包部署已完成**（P8 只差持续运维项：仓库与 CI 已就位）。P3 论坛/软件源、P5 控制台/CLI、P7 Capacitor、P9 TaskManager 集成未开工。
 >
 > SDK 一览（esbuild bundle + minify + gzip，`pnpm sdk:size` 复测）：
 >
@@ -31,8 +31,8 @@ pnpm dev                   # http://127.0.0.1:8100
 验证：
 
 ```bash
-curl http://127.0.0.1:8100/v1/healthz    # {"status":"ok",...}
-curl http://127.0.0.1:8100/v1/readyz     # 会真查一次数据库
+curl http://127.0.0.1:8100/v1/healthz    # {"ok":true,"version":"0.1.0","uptime":...}
+curl http://127.0.0.1:8100/v1/readyz     # {"ok":true,"db":true}，会真查一次数据库
 ```
 
 ## 仓库结构
@@ -51,6 +51,14 @@ examples/
 scripts/
   bench/          100MB 分片上传基准（服务端独立进程）
   bundle-size.mjs SDK 体积测量
+  gen-api-docs.mjs 从源码提取路由生成 API 文档（--check 防漂移）
+deploy/
+  ssio.service            systemd 单元
+  install-windows.ps1     NSSM 注册 Windows 服务（含 readyz 自检）
+  uninstall-windows.ps1
+docs/
+  03-API参考.md   自动生成（pnpm gen:api-docs），不要手改
+  04-部署运维.md   三种部署方式 + 备份恢复 + 运维清单
 ```
 
 后续会依次加入 `console/`、`cli/` 等包（P5）。
@@ -83,7 +91,21 @@ pnpm typecheck    # 全包类型检查（最便宜的验证）
 pnpm lint         # ESLint，--max-warnings 0
 pnpm db:generate  # drizzle-kit 生成迁移（禁止手写 CREATE TABLE）
 pnpm example:e2e  # 全链路冒烟（需先 pnpm build）：建应用 → 上传 → 发版 → 拉更新 → 下载校验 → 发卡 → 核销
+pnpm gen:api-docs # 从源码重新生成 docs/03-API参考.md（改了路由就要跑）
+pnpm docs:check   # 校验文档没漂移，CI 会跑
+pnpm backup       # 备份数据（VACUUM INTO 一致性快照，不用停服务）
+pnpm restore      # 恢复（默认拒绝覆盖，需 --from <备份目录> [--force]）
 ```
+
+## 部署
+
+```bash
+cp .env.example .env      # 填 JWT_SECRET / MASTER_KEY（缺了拒绝启动）
+docker compose up -d      # 数据落在命名卷 ssio-data
+```
+
+另有裸机 systemd（`deploy/ssio.service`）与 Windows 服务（`deploy/install-windows.ps1`，NSSM）两条路。
+完整说明（反向代理、自动备份、升级、运维清单）见 [`docs/04-部署运维.md`](docs/04-部署运维.md)。
 
 ## 设计红线
 
@@ -99,10 +121,9 @@ pnpm example:e2e  # 全链路冒烟（需先 pnpm build）：建应用 → 上�
 | P1 | 服务端骨架：monorepo、认证、应用与 APIKey 管理 | 完成 |
 | P2 | 核心能力：版本发行、分片存储、发卡、公告 | 完成 |
 | P4 | 客户端 SDK：core / web / node（含 Electron 更新执行器） | 完成 |
+| P6 | 打包与部署：Docker / systemd / Windows 服务、备份恢复、API 文档生成 | 完成 |
 | P3 | 论坛与软件源 | 待开工 |
-| P4 | 客户端 SDK | 待开工 |
 | P5 | 控制台与 CLI | 待开工 |
-| P6 | 打包与部署（Docker / 备份恢复 / API 文档生成） | 待开工 |
 | P7 | Capacitor 移动端壳 | 待开工 |
 | P8 | GitHub 仓库与 CI | 进行中 |
 | P9 | TaskManager 集成（首个消费方） | 待开工 |

@@ -26,3 +26,6 @@ Prompt/APIKeys.txt
 .tmp-*
 .DS_Store
 Thumbs.db
+
+# pnpm deploy 的验证产物（本机验证 Dockerfile 时生成的）
+.deploy-*/

@@ -1,0 +1,49 @@
+# SSIO systemd 单元（裸机部署，Docker 之外的选择）
+#
+# 用法：
+#   sudo useradd -r -s /usr/sbin/nologin ssio
+#   sudo mkdir -p /opt/ssio && sudo chown ssio:ssio /opt/ssio
+#   # 把 packages/server/{dist,drizzle,package.json} + packages/shared/{dist,package.json}
+#   # + package.json/pnpm-lock.yaml/pnpm-workspace.yaml/.npmrc 放到 /opt/ssio，
+#   # 然后在 /opt/ssio 里跑：sudo -u ssio pnpm install --frozen-lockfile --prod --filter '@ssio/server...'
+#   sudo cp deploy/ssio.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now ssio
+#   systemctl status ssio
+
+[Unit]
+Description=SSIO self-hosted BaaS
+Documentation=https://github.com/NightRainStarGame/StarServerIO
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ssio
+Group=ssio
+WorkingDirectory=/opt/ssio
+
+# 必填：JWT_SECRET / MASTER_KEY；建议把 DATA_DIR 也写成绝对路径
+EnvironmentFile=/opt/ssio/.env
+
+ExecStart=/usr/bin/node packages/server/dist/index.js
+
+# 启动失败必须真的退出（index.ts 已保证 exit 1），systemd 才会按 Restart 处理
+Restart=always
+RestartSec=5
+# 优雅关闭：SIGTERM 会被 index.ts 捕获，关连接 + close sqlite
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+# 加固：只给数据目录写权限，其余文件系统只读
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ssio/data
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ssio
+
+[Install]
+WantedBy=multi-user.target

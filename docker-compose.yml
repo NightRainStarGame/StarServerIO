@@ -1,0 +1,44 @@
+# SSIO 服务端（单机部署）
+#
+# 起服务：
+#   cp .env.example .env   # 至少填 JWT_SECRET 与 MASTER_KEY
+#   docker compose up -d
+#
+# 升级：
+#   docker compose pull && docker compose up -d   （数据卷不动）
+#
+# 备份（服务不用停，VACUUM INTO 在线做）：
+#   docker compose exec ssio node packages/server/scripts/backup.mjs --out /data/backups
+# 但更推荐在镜像里不带脚本时，直接在宿主机跑：pnpm backup --out <目录>
+
+services:
+  ssio:
+    build: .
+    image: ssio:latest
+    container_name: ssio
+    restart: unless-stopped
+    ports:
+      # 宿主只监听本机：对外请在前置 Nginx 上做 TLS 与限流
+      - "127.0.0.1:8100:8100"
+    environment:
+      # 容器里必须显式 0.0.0.0：默认 127.0.0.1 只会监听容器内部，宿主访问不到
+      HOST: 0.0.0.0
+      PORT: "8100"
+      DATA_DIR: /data
+      LOG_LEVEL: info
+      RATE_LIMIT_MAX: "600"
+      # 必填：缺了启动会被 zod 校验拦下（宁可起不来，也不能用默认密钥上线）
+      JWT_SECRET: ${JWT_SECRET:?请先在 .env 里设置 JWT_SECRET（openssl rand -hex 32）}
+      MASTER_KEY: ${MASTER_KEY:?请先在 .env 里设置 MASTER_KEY}
+    volumes:
+      # 数据库 + 存储对象都在这里，删卷 = 删数据
+      - ssio-data:/data
+    # 存对象较大时给日志留点余地
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  ssio-data:
