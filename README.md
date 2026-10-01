@@ -6,7 +6,7 @@
 
 单体仓库（pnpm workspace），Node 22 + TypeScript，服务端 Fastify 5 + Drizzle ORM(SQLite)。
 
-> 当前阶段：**P1 骨架 + P2 核心能力 + P3 论坛与软件源 + P4 客户端 SDK + P5 控制台与 CLI + P6 打包部署已完成**（P8 只差持续运维项：仓库与 CI 已就位）。P7 Capacitor、P9 TaskManager 集成未开工。
+> 当前阶段：**P1 骨架 + P2 核心能力 + P3 论坛与软件源 + P4 客户端 SDK + P5 控制台与 CLI + P6 打包部署 + P7 移动端壳已完成**（P8 只差持续运维项：仓库与 CI 已就位）。P9 TaskManager 集成未开工。
 >
 > SDK 一览（esbuild bundle + minify + gzip，`pnpm sdk:size` 复测）：
 >
@@ -46,6 +46,7 @@ packages/
   node/     @ssio/node     Node/Electron SDK（下载/校验/updater）
   cli/      @ssio/cli      ssio 命令行运维（建应用/发版/发卡/发公告）
 console/         管理控制台（React + Vite，Master Key 登录）
+mobile/          Capacitor 移动端壳（验证 @ssio/web 在真机 WebView 可用）
 examples/
   web-min/        浏览器最小接入（import map + 静态服务）
   electron-min/   Electron 更新演示（服务端内嵌为独立 node 子进程）
@@ -172,7 +173,7 @@ docker compose up -d      # 数据落在命名卷 ssio-data
 | P5 | 控制台与 CLI | 完成 |
 | P6 | 打包与部署：Docker / systemd / Windows 服务、备份恢复、API 文档生成 | 完成 |
 | P3 | 论坛与软件源 | 完成 |
-| P7 | Capacitor 移动端壳 | 待开工 |
+| P7 | Capacitor 移动端壳 | 完成 |
 | P8 | GitHub 仓库与 CI | 进行中 |
 | P9 | TaskManager 集成（首个消费方） | 待开工 |
 

@@ -1,0 +1,128 @@
+/* 移动端：大按钮、单列、可被大拇指够到 —— 不做花活。 */
+
+:root {
+  --bg: #0e1116;
+  --panel: #161b22;
+  --line: #262d38;
+  --text: #d7dee8;
+  --muted: #8b98a8;
+  --accent: #4f8cff;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  /* 移动端禁止选中：长按输入框之外的区域不该弹菜单 */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  /* 避开 iOS 刘海与底部安全区 */
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+main {
+  flex: 1;
+  padding: 16px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+label {
+  display: block;
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+input,
+select,
+button {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 12px;
+  font: inherit;
+  color: var(--text);
+  background: #0c1017;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  /* 输入框要能选中（复制粘贴 Key），覆盖上面的全局禁止 */
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+button {
+  cursor: pointer;
+  background: #1c2430;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #08101f;
+  font-weight: 600;
+}
+button:disabled {
+  opacity: 0.5;
+}
+
+nav {
+  display: flex;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+nav button {
+  flex: 1;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 14px 0;
+}
+nav button.active {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+article {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+article h4 {
+  margin: 0 0 6px;
+}
+
+.log {
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px;
+  background: #0c1017;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  -webkit-user-select: text;
+  user-select: text;
+}
