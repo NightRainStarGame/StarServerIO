@@ -60,9 +60,11 @@ deploy/
   ssio.service            systemd 单元
   install-windows.ps1     NSSM 注册 Windows 服务（含 readyz 自检）
   uninstall-windows.ps1
+  remote-deploy.mjs       从本机一键部署到远程 Linux（SSH）
 docs/
   03-API参考.md   自动生成（pnpm gen:api-docs），不要手改
   04-部署运维.md   三种部署方式 + 备份恢复 + 运维清单
+  05-快速上手.md   10 分钟跑通：起服务 → 建应用 → 发版 → 拉更新 → 发卡 → 核销
 ```
 
 （P5 的 `console/` 与 `cli/` 已就位，无后续包计划。）
@@ -136,6 +138,32 @@ docker compose up -d      # 数据落在命名卷 ssio-data
 
 另有裸机 systemd（`deploy/ssio.service`）与 Windows 服务（`deploy/install-windows.ps1`，NSSM）两条路。
 完整说明（反向代理、自动备份、升级、运维清单）见 [`docs/04-部署运维.md`](docs/04-部署运维.md)。
+
+### 从本机一键部署到远程 Linux
+
+```bash
+npm i ssh2    # 脚本按需加载，不进项目依赖
+node deploy/remote-deploy.mjs --host <域名/IP> --user ubuntu --password <密码>
+node deploy/remote-deploy.mjs --host <域名/IP> --user ubuntu --key ~/.ssh/id_ed25519 --dir /home/ubuntu/SSIO
+```
+
+它会：用 `git archive` 打包**已提交内容**（不含 node_modules/dist/data，本地未提交的改动不会偷偷上生产）
+→ SFTP 上传 → 装 Node 22 与 pnpm（走 npmmirror，国内服务器拉 GitHub 会超时）→ 装依赖（排除 electron-min）
+→ 构建 → 生成 `.env`（随机密钥）→ 注册 systemd → 打 `/v1/readyz` 自检 → 打印 Master Key。
+
+服务器需开放 SSH（22）；只支持公钥登录时传 `--key`。加 `--no-service` 可只用 nohup 起进程（无 root 时）。
+
+## 快速上手
+
+10 分钟跑通「建应用 → 发版 → 客户端拉更新 → 发卡 → 核销」，见 [`docs/05-快速上手.md`](docs/05-快速上手.md)。
+一句话版：
+
+```bash
+pnpm install && cp .env.example .env && pnpm build && pnpm dev
+pnpm cli -- app create myapp --name "我的应用"
+pnpm cli -- key issue --app myapp --scopes 'release:read,release:write,storage:read,storage:write'
+pnpm cli -- release publish --app myapp --version 1.0.0 --file ./Setup.exe --platform win --arch x64
+```
 
 ## 设计红线
 

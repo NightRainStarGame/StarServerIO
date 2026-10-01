@@ -27,5 +27,7 @@ Prompt/APIKeys.txt
 .DS_Store
 Thumbs.db
 
+# 远程部署脚本的打包产物（git archive 出来的源码包）
+.deploy/
 # pnpm deploy 的验证产物（本机验证 Dockerfile 时生成的）
 .deploy-*/
