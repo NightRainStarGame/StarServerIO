@@ -6,7 +6,8 @@
 
 单体仓库（pnpm workspace），Node 22 + TypeScript，服务端 Fastify 5 + Drizzle ORM(SQLite)。
 
-> 当前阶段：**P1 骨架 + P2 核心能力 + P3 论坛与软件源 + P4 客户端 SDK + P5 控制台与 CLI + P6 打包部署 + P7 移动端壳已完成**（P8 只差持续运维项：仓库与 CI 已就位）。P9 TaskManager 集成未开工。
+> 当前阶段：**P1–P9 全部完成**（P8 只差持续运维项：仓库与 CI 已就位）。
+> 服务端能力齐了，首个消费方 TaskManager 已接入（可选更新源，默认关闭）。
 >
 > SDK 一览（esbuild bundle + minify + gzip，`pnpm sdk:size` 复测）：
 >
@@ -163,6 +164,22 @@ docker compose up -d      # 数据落在命名卷 ssio-data
 包体不单独存：复用 storage，`fileId` 指过去即可 —— 配额、秒传、签名下载全部白拿。
 版本**不可覆盖**（重复发同版本 → 409），`latest` 只按 semver 前进（回滚发布不会把 latest 拉回去）。
 
+## TaskManager 怎么用 SSIO（P9）
+
+TaskManager 的更新系统围绕 `latest.json` 清单工作（多源测速、增量补丁、备源镜像都建在上面）。
+SSIO 是 API 服务没有清单文件，所以适配层做的是**把 API 响应合成成一份清单文本** ——
+下游一行都不用改（见 `electron/updater/ssio.ts`）。
+
+在 TaskManager 的「设置 → 更新源」里添加：
+
+| 字段 | 值 |
+|---|---|
+| URL | `ssio+http://<你的 SSIO 地址>:8100`（`ssio+` 前缀是识别标记） |
+| 提取码 | APIKey（需要 `release:read`） |
+
+默认关闭：不配置 `ssio+` 源时，TaskManager 的更新行为与接入前**完全一致**。
+SSIO 不做增量补丁（`patches` 留空 → 走整包）；`mandatory` 映射为清单的 `force`。
+
 ## 路线图
 
 | 阶段 | 内容 | 状态 |
@@ -175,7 +192,7 @@ docker compose up -d      # 数据落在命名卷 ssio-data
 | P3 | 论坛与软件源 | 完成 |
 | P7 | Capacitor 移动端壳 | 完成 |
 | P8 | GitHub 仓库与 CI | 进行中 |
-| P9 | TaskManager 集成（首个消费方） | 待开工 |
+| P9 | TaskManager 集成（首个消费方） | 完成 |
 
 ## 环境变量
 

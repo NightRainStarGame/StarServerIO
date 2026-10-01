@@ -21,6 +21,7 @@ import * as admin from './commands/admin.js';
 import * as biz from './commands/biz.js';
 import { createOut } from './format.js';
 import { parse } from './parse.js';
+import { pathToFileURL } from 'node:url';
 
 const USAGE = `用法：ssio <命令> [子命令] [选项]
 
@@ -126,8 +127,11 @@ export async function run(argv: string[]): Promise<number> {
   }
 }
 
-// 直接被 node 执行时才跑；被 import（测试）时不跑
-if (process.argv[1] && import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`) {
+// 直接被 node 执行时才跑；被 import（测试）时不跑。
+// 必须用 pathToFileURL 比对：Windows 下 import.meta.url 是 file:///D:/...
+// （三个斜杠），手工拼 `file://${path}` 会少一个斜杠，导致入口永远不触发。
+const invokedDirectly = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
+if (invokedDirectly) {
   const code = await run(process.argv.slice(2));
   process.exit(code);
 }
