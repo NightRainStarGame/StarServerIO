@@ -6,7 +6,7 @@
 
 单体仓库（pnpm workspace），Node 22 + TypeScript，服务端 Fastify 5 + Drizzle ORM(SQLite)。
 
-> 当前阶段：**P1 服务端骨架已完成**，P2 及以后未开工。接口清单见 [`packages/server/README.md`](packages/server/README.md)。
+> 当前阶段：**P1 服务端骨架 + P2 核心能力（发行 / 存储 / 发卡 / 公告）已完成**，P3 及以后未开工。接口清单见 [`packages/server/README.md`](packages/server/README.md)。
 
 ## 30 秒跑起来
 
@@ -62,6 +62,7 @@ pnpm test         # 全包测试
 pnpm typecheck    # 全包类型检查（最便宜的验证）
 pnpm lint         # ESLint，--max-warnings 0
 pnpm db:generate  # drizzle-kit 生成迁移（禁止手写 CREATE TABLE）
+pnpm example:e2e  # 全链路冒烟（需先 pnpm build）：建应用 → 上传 → 发版 → 拉更新 → 下载校验 → 发卡 → 核销
 ```
 
 ## 设计红线
@@ -76,7 +77,7 @@ pnpm db:generate  # drizzle-kit 生成迁移（禁止手写 CREATE TABLE）
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | P1 | 服务端骨架：monorepo、认证、应用与 APIKey 管理 | 完成 |
-| P2 | 核心能力：版本发行、分片存储、发卡、公告 | 待开工 |
+| P2 | 核心能力：版本发行、分片存储、发卡、公告 | 完成 |
 | P3 | 论坛与软件源 | 待开工 |
 | P4 | 客户端 SDK | 待开工 |
 | P5 | 控制台与 CLI | 待开工 |

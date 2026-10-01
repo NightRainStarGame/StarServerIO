@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
@@ -11,10 +12,20 @@ import { registerApps } from './modules/apps.js';
 import { registerApiKeys } from './modules/apikeys.js';
 import { registerAuth as registerAuthRoutes } from './modules/auth.js';
 import { registerUsers } from './modules/users.js';
+import { registerStorage } from './modules/storage.js';
+import { registerReleases } from './modules/releases.js';
+import { registerCards } from './modules/cards.js';
+import { registerAnnouncements } from './modules/announcements.js';
+import { LocalDriver } from './storage/local.js';
+import { StorageService } from './storage/service.js';
+import type { StorageDriver } from './storage/driver.js';
+import type { ModuleOptions } from './types.js';
 
 export interface BuildAppOptions {
   db: Db;
   config: ServerConfig;
+  /** 注入自定义驱动（测试用）。缺省时使用本地文件系统驱动。 */
+  driver?: StorageDriver;
 }
 
 /**
@@ -46,13 +57,22 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   await registerRateLimit(app, config);
   registerAuth(app, db, config);
 
-  const moduleOpts = { db, config };
+  // 存储：对象一律落在 DATA_DIR/storage，绝不放在源码目录里
+  const driver =
+    opts.driver ?? new LocalDriver({ root: join(config.dataDir, 'storage'), signSecret: config.JWT_SECRET });
+  const storage = new StorageService(db, driver, config.dataDir);
+
+  const moduleOpts: ModuleOptions = { db, config, storage };
   await app.register(async (instance) => {
     await registerHealth(instance, moduleOpts);
     await registerApps(instance, moduleOpts);
     await registerApiKeys(instance, moduleOpts);
     await registerAuthRoutes(instance, moduleOpts);
     await registerUsers(instance, moduleOpts);
+    await registerStorage(instance, moduleOpts);
+    await registerReleases(instance, moduleOpts);
+    await registerCards(instance, moduleOpts);
+    await registerAnnouncements(instance, moduleOpts);
   });
 
   await app.ready();

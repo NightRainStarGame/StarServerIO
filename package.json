@@ -2,6 +2,7 @@
   "name": "starserverio",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "SSIO · 自托管通用云后端中台（BaaS）单体仓库",
   "packageManager": "pnpm@10.34.6",
   "engines": {
@@ -13,7 +14,8 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . --max-warnings 0",
-    "db:generate": "pnpm --filter @ssio/server db:generate"
+    "db:generate": "pnpm --filter @ssio/server db:generate",
+    "example:e2e": "node --experimental-strip-types examples/node-e2e.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

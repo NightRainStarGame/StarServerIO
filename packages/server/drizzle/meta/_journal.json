@@ -8,6 +8,13 @@
       "when": 1790827353845,
       "tag": "0000_funny_kingpin",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790833597169,
+      "tag": "0001_material_steel_serpent",
+      "breakpoints": true
     }
   ]
 }

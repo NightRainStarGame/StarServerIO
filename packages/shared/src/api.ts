@@ -36,6 +36,8 @@ export interface AppRecord {
   name: string;
   description: string | null;
   ownerId: string | null;
+  /** 存储配额（字节）。P2 起由存储模块消费。 */
+  quotaBytes: number;
   createdAt: number;
 }
 

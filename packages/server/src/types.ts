@@ -3,6 +3,7 @@
 import type { FastifyReply } from 'fastify';
 import type { Db } from './db/client.js';
 import type { ServerConfig } from './env.js';
+import type { StorageService } from './storage/service.js';
 
 /** 一次请求的认证上下文，由鉴权插件写入。 */
 export interface RequestContext {
@@ -16,6 +17,8 @@ export interface RequestContext {
 export interface ModuleOptions {
   db: Db;
   config: ServerConfig;
+  /** 分片上传服务（P2）。由 app.ts 构造后注入，便于测试替换驱动。 */
+  storage: StorageService;
 }
 
 declare module 'fastify' {

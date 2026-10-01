@@ -2,7 +2,7 @@ import { Type } from '@sinclair/typebox';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { AppError, type AppRecord } from '@ssio/shared';
-import { apiKeys, apps, refreshTokens, users } from '../db/schema.js';
+import { apiKeys, apps, DEFAULT_QUOTA_BYTES, refreshTokens, users } from '../db/schema.js';
 import { newId } from '../db/client.js';
 import { writeAudit } from '../lib/audit.js';
 import { NullableString } from '../schema/common.js';
@@ -14,6 +14,7 @@ const AppSchema = Type.Object({
   name: Type.String(),
   description: NullableString(),
   ownerId: NullableString(),
+  quotaBytes: Type.Integer(),
   createdAt: Type.Number(),
 });
 
@@ -22,12 +23,15 @@ const CreateAppBody = Type.Object({
   name: Type.String({ minLength: 1, maxLength: 64 }),
   description: Type.Optional(Type.String({ maxLength: 500 })),
   ownerId: Type.Optional(NullableString()),
+  quotaBytes: Type.Optional(Type.Integer({ minimum: 1 })),
 });
 
 const UpdateAppBody = Type.Object({
   name: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   description: Type.Optional(Type.Union([Type.Null(), Type.String({ maxLength: 500 })])),
   ownerId: Type.Optional(NullableString()),
+  // 配额调整走这里：测试与运维都靠它把某个 app 压到很小来验收 507
+  quotaBytes: Type.Optional(Type.Integer({ minimum: 1 })),
 });
 
 function toRecord(row: typeof apps.$inferSelect): AppRecord {
@@ -37,6 +41,7 @@ function toRecord(row: typeof apps.$inferSelect): AppRecord {
     name: row.name,
     description: row.description,
     ownerId: row.ownerId,
+    quotaBytes: row.quotaBytes,
     createdAt: row.createdAt,
   };
 }
@@ -54,6 +59,7 @@ export async function registerApps(app: FastifyInstance, opts: ModuleOptions): P
         name: string;
         description?: string;
         ownerId?: string | null;
+        quotaBytes?: number;
       };
 
       const exists = db.select().from(apps).where(eq(apps.slug, body.slug)).get();
@@ -65,6 +71,8 @@ export async function registerApps(app: FastifyInstance, opts: ModuleOptions): P
         name: body.name,
         description: body.description ?? null,
         ownerId: body.ownerId ?? null,
+        // 显式写默认值而不是依赖 DB default：这里的值要立刻回给调用方确认
+        quotaBytes: body.quotaBytes ?? DEFAULT_QUOTA_BYTES,
         createdAt: Date.now(),
       };
       db.insert(apps).values(row).run();
@@ -107,11 +115,17 @@ export async function registerApps(app: FastifyInstance, opts: ModuleOptions): P
       const row = db.select().from(apps).where(eq(apps.id, id)).get();
       if (!row) throw new AppError('NOT_FOUND', '应用不存在');
 
-      const body = req.body as { name?: string; description?: string | null; ownerId?: string | null };
+      const body = req.body as {
+        name?: string;
+        description?: string | null;
+        ownerId?: string | null;
+        quotaBytes?: number;
+      };
       const patch: Partial<typeof apps.$inferInsert> = {};
       if (body.name !== undefined) patch.name = body.name;
       if (body.description !== undefined) patch.description = body.description;
       if (body.ownerId !== undefined) patch.ownerId = body.ownerId;
+      if (body.quotaBytes !== undefined) patch.quotaBytes = body.quotaBytes;
 
       if (Object.keys(patch).length > 0) db.update(apps).set(patch).where(eq(apps.id, id)).run();
 
