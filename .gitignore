@@ -1,0 +1,28 @@
+node_modules/
+dist/
+coverage/
+.vscode/
+.idea/
+
+# 环境变量与密钥，绝不入库
+.env
+.env.local
+.env.*.local
+
+# 数据库与运行时数据
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# 签名与凭据
+*.keystore
+*.jks
+*.pem
+Prompt/APIKeys.txt
+
+# 日志与临时文件
+*.log
+.tmp-*
+.DS_Store
+Thumbs.db
