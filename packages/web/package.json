@@ -1,0 +1,43 @@
+{
+  "name": "@ssio/web",
+  "version": "0.1.0",
+  "description": "SSIO 浏览器 SDK：localStorage 持久化登录态、并发分片上传（进度回调）、公告拉取。React hooks 走 @ssio/web/react 子路径",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ssio/core": "workspace:*",
+    "@ssio/shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "happy-dom": "^15.11.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@ssio/node",
+  "version": "0.1.0",
+  "description": "SSIO Node / Electron 主进程 SDK：token 文件持久化、流式下载（断点续传 + sha256 校验）、自动更新执行器",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ssio/core": "workspace:*",
+    "@ssio/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@ssio/server": "workspace:*",
+    "supertest": "^7.1.0",
+    "vitest": "^3.2.4"
+  }
+}

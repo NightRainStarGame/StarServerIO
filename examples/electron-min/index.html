@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font-family: system-ui, sans-serif; background: #14161d; color: #e8eaf2; margin: 0; padding: 24px; }
+    h1 { font-size: 16px; margin: 0 0 4px; }
+    .muted { color: #8b91a5; font-size: 13px; }
+    .ver { font-size: 42px; font-weight: 700; margin: 12px 0 2px; }
+    .new { color: #4ade80; }
+    progress { width: 100%; height: 16px; margin: 18px 0 6px; }
+    #result { word-break: break-all; font-size: 12px; line-height: 1.7; }
+    .box { background: #1d2029; border: 1px solid #2c3040; border-radius: 10px; padding: 16px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h1>SSIO · Electron 自动更新示例</h1>
+  <div class="muted" id="status">启动中…</div>
+  <div class="ver" id="current">1.2.3</div>
+  <div id="found" style="display:none">
+    <div class="ver new" id="newVersion"></div>
+    <div class="muted" id="notes"></div>
+    <progress id="bar" value="0" max="100"></progress>
+    <div class="muted" id="pct"></div>
+  </div>
+  <div class="box" id="result"></div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    const $ = (id) => document.getElementById(id);
+    ipcRenderer.on('status', (_e, d) => { $('status').textContent = d.text; });
+    ipcRenderer.on('found', (_e, d) => {
+      $('found').style.display = 'block';
+      $('newVersion').textContent = `发现更新 ${d.version}${d.mandatory ? '（强制）' : ''}`;
+      $('notes').textContent = d.notes ?? '';
+    });
+    ipcRenderer.on('progress', (_e, d) => {
+      $('bar').value = d.percent;
+      $('pct').textContent = `${d.percent}%（${(d.downloaded / 1048576).toFixed(1)} / ${(d.total / 1048576).toFixed(1)} MB）`;
+    });
+    ipcRenderer.on('done', (_e, d) => {
+      $('result').innerHTML = `<b>已下载并通过 sha256 校验</b><br>${d.file}<br><span class="muted">${d.message}</span>`;
+    });
+  </script>
+</body>
+</html>

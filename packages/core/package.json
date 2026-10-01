@@ -1,0 +1,26 @@
+{
+  "name": "@ssio/core",
+  "version": "0.1.0",
+  "description": "SSIO SDK 传输层：fetch 抽象、重试退避、401 自动续期（并发去重）、错误归一化、分页迭代器。环境无关（无 fs / 无 DOM）",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ssio/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

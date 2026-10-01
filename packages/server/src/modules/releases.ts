@@ -248,6 +248,8 @@ export async function registerReleases(app: FastifyInstance, opts: ModuleOptions
       );
       return {
         hasUpdate: true as const,
+        // 给 updater 用：下载计数/回查版本详情都靠它
+        releaseId: result.release.id,
         version: result.release.version,
         notes: result.release.notesMd,
         size: result.release.sizeBytes,

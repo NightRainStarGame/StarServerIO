@@ -6,7 +6,17 @@
 
 单体仓库（pnpm workspace），Node 22 + TypeScript，服务端 Fastify 5 + Drizzle ORM(SQLite)。
 
-> 当前阶段：**P1 服务端骨架 + P2 核心能力（发行 / 存储 / 发卡 / 公告）已完成**，P3 及以后未开工。接口清单见 [`packages/server/README.md`](packages/server/README.md)。
+> 当前阶段：**P1 骨架 + P2 核心能力 + P4 客户端 SDK 已完成**（P8 只差持续运维项：仓库与 CI 已就位）。P3 论坛/软件源、P5 控制台/CLI、P6 打包部署、P7 Capacitor、P9 TaskManager 集成未开工。
+>
+> SDK 一览（esbuild bundle + minify + gzip，`pnpm sdk:size` 复测）：
+>
+> | 包 | gzip | 说明 |
+> |---|---|---|
+> | `@ssio/core` | 2.22 KB | 传输层：重试退避 / 401 并发去重续期 / 错误归一 / 分页迭代器 |
+> | `@ssio/web` | 2.76 KB | localStorage 持久化 + 并发分片上传（进度回调）；React hooks 走 `@ssio/web/react` 子路径（0.68 KB，React 为 optional peer） |
+> | `@ssio/node` | —（Node 端不计） | token 文件持久化 + 流式下载（断点续传 + sha256 校验）+ `createUpdater` 自动更新执行器 |
+>
+> 示例：`examples/web-min`（浏览器 5 行接入）、`examples/electron-min`（Electron 窗口演示 1.2.3 → 1.3.0 更新全流程，服务端以独立 node 子进程内嵌）、`examples/node-e2e.ts`（`pnpm example:e2e` 全链路冒烟）。
 
 ## 30 秒跑起来
 
@@ -30,10 +40,20 @@ curl http://127.0.0.1:8100/v1/readyz     # 会真查一次数据库
 ```
 packages/
   shared/   共享层：错误码、scope 常量、semver 比较、API 类型（server 与 SDK 共用）
-  server/   服务端：Fastify 路由 + Drizzle(SQLite)，迁移在 drizzle/
+  server/   服务端：Fastify 路由 + Drizzle(SQLite)，迁移在 drizzle/；@ssio/server/embed 供嵌入式复用
+  core/     @ssio/core     SDK 传输层（环境无关）
+  web/      @ssio/web      浏览器 SDK（React hooks 在 ./react 子路径）
+  node/     @ssio/node     Node/Electron SDK（下载/校验/updater）
+examples/
+  web-min/        浏览器最小接入（import map + 静态服务）
+  electron-min/   Electron 更新演示（服务端内嵌为独立 node 子进程）
+  node-e2e.ts     SDK 版全链路冒烟
+scripts/
+  bench/          100MB 分片上传基准（服务端独立进程）
+  bundle-size.mjs SDK 体积测量
 ```
 
-以后会依次加入 `sdk/`、`console/`、`cli/` 等包。
+后续会依次加入 `console/`、`cli/` 等包（P5）。
 
 ## 鉴权模型（三通道）
 
@@ -78,6 +98,7 @@ pnpm example:e2e  # 全链路冒烟（需先 pnpm build）：建应用 → 上�
 |---|---|---|
 | P1 | 服务端骨架：monorepo、认证、应用与 APIKey 管理 | 完成 |
 | P2 | 核心能力：版本发行、分片存储、发卡、公告 | 完成 |
+| P4 | 客户端 SDK：core / web / node（含 Electron 更新执行器） | 完成 |
 | P3 | 论坛与软件源 | 待开工 |
 | P4 | 客户端 SDK | 待开工 |
 | P5 | 控制台与 CLI | 待开工 |

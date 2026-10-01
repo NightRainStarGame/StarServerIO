@@ -190,6 +190,7 @@ describe('Release 接口', () => {
       .query({ platform: 'win', channel: 'stable', arch: 'x64', current: '1.0.0' });
     expect(after.body.hasUpdate).toBe(true);
     expect(after.body.version).toBe('1.1.0');
+    expect(after.body.releaseId).toBe(created.body.id);
     expect(after.body.size).toBe(1024 * 1024);
     expect(after.body.url).toContain('/v1/storage/raw/');
   });

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>SSIO web-min · 登录 + 上传 + 公告</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #e8eaf2; background: #14161d; }
+    section { background: #1d2029; border: 1px solid #2c3040; border-radius: 10px; padding: 1rem 1.2rem; margin: 1rem 0; }
+    input { background: #14161d; color: #e8eaf2; border: 1px solid #2c3040; border-radius: 6px; padding: 6px 8px; width: 100%; box-sizing: border-box; }
+    button { background: #4f7cff; border: 0; color: #fff; border-radius: 6px; padding: 8px 16px; cursor: pointer; margin-top: 8px; }
+    progress { width: 100%; height: 14px; }
+    .muted { color: #8b91a5; font-size: 13px; }
+    li { margin: 4px 0; }
+    .ok { color: #4ade80; } .err { color: #f87171; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "@ssio/web": "/vendor/web/index.js",
+        "@ssio/web/react": "/vendor/web/react.js",
+        "@ssio/core": "/vendor/core/index.js",
+        "@ssio/shared": "/vendor/shared/index.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <h2>SSIO web-min</h2>
+  <p class="muted">一个 index.html 用 <code>@ssio/web</code> 接上自托管服务端：登录 → 拉公告 → 分片上传带进度。5 行代码接入的体验演示。</p>
+
+  <section>
+    <label>服务端地址</label>
+    <input id="baseUrl" value="http://127.0.0.1:8100" />
+    <label style="margin-top:8px">应用 APIKey</label>
+    <input id="apiKey" placeholder="ssio_live_..." />
+    <label style="margin-top:8px">用户名 / 密码（不存在会自动注册）</label>
+    <input id="username" value="demo" />
+    <input id="password" type="password" value="demo-pass-123" />
+    <button id="connect">连接</button>
+    <span id="connectState" class="muted"></span>
+  </section>
+
+  <section>
+    <strong>公告</strong>
+    <ul id="announcements"><li class="muted">未连接</li></ul>
+  </section>
+
+  <section>
+    <strong>上传</strong>
+    <input id="file" type="file" style="margin-top:8px" />
+    <progress id="bar" value="0" max="100"></progress>
+    <div id="fileResult" class="muted"></div>
+  </section>
+
+  <script type="module">
+    import { createWebClient } from '@ssio/web';
+
+    let client = null;
+    document.getElementById('connect').onclick = async () => {
+      const baseUrl = document.getElementById('baseUrl').value.replace(/\/+$/, '');
+      const apiKey = document.getElementById('apiKey').value.trim();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value || 'demo-pass-123';
+      const state = document.getElementById('connectState');
+      if (!apiKey) { state.textContent = '先填 APIKey（用 Master Key 在 /v1/keys 签发一个）'; state.className = 'err'; return; }
+      try {
+        client = createWebClient({ baseUrl, apiKey });
+        state.textContent = '已连接，登录中…'; state.className = 'muted';
+        const me = await client.auth.login({ username, password }).catch(() => client.auth.register({ username, password }));
+        state.textContent = `已登录：${me.user.nickname ?? me.user.username}`; state.className = 'ok';
+        renderAnnouncements();
+      } catch (e) {
+        state.textContent = `连接失败：${e.message}`; state.className = 'err';
+      }
+    };
+
+    async function renderAnnouncements() {
+      const ul = document.getElementById('announcements');
+      ul.innerHTML = '<li class="muted">加载中…</li>';
+      try {
+        const items = await client.announcements.active();
+        ul.innerHTML = items.length
+          ? items.map((a) => `<li><b>[${a.level}]</b> ${a.title}</li>`).join('')
+          : '<li class="muted">（没有生效中的公告）</li>';
+      } catch (e) {
+        ul.innerHTML = `<li class="err">${e.message}</li>`;
+      }
+    }
+
+    document.getElementById('file').onchange = async (ev) => {
+      if (!client) { document.getElementById('fileResult').textContent = '先连接'; return; }
+      const file = ev.target.files[0];
+      if (!file) return;
+      const bar = document.getElementById('bar');
+      const out = document.getElementById('fileResult');
+      out.textContent = `上传中：${file.name}（${(file.size / 1024 / 1024).toFixed(1)} MB）`;
+      try {
+        const done = await client.upload(file, {
+          onProgress: (p) => { bar.value = p.percent; out.textContent = `${p.percent}%（${p.uploaded}/${p.total} 字节）`; },
+        });
+        out.innerHTML = `<span class="ok">上传成功</span> fileId=<code>${done.fileId}</code> sha256=<code>${done.sha256.slice(0, 16)}…</code>${done.dedup ? '（秒传）' : ''}`;
+      } catch (e) {
+        out.innerHTML = `<span class="err">上传失败：${e.message}</span>`;
+      }
+    };
+  </script>
+</body>
+</html>
