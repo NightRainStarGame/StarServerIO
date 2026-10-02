@@ -308,6 +308,37 @@ export const forumPosts = sqliteTable(
   (t) => [uniqueIndex('uq_forum_posts_floor').on(t.threadId, t.floor), index('idx_forum_posts_thread').on(t.threadId, t.createdAt)],
 );
 
+/* ---------------- P10：KV（结构化 JSON 文档，供业务做轻量云同步） ---------------- */
+
+/**
+ * KV：按 (appId, key) 存一份 JSON/文本，带单调递增 version 做乐观锁。
+ *
+ * 存在的理由：storage 是「对象存储」，上传后只能凭 fileId 取回，没有列举接口，
+ * 跨设备无法发现对方写的文件 —— 做不了「多端共享同一份结构化数据」。
+ * KV 补齐这一层：key 由业务方自己定义（形如 `class/<code>/manifest.json`），
+ * upsert 语义，不产生垃圾文件，version 用于并发覆盖保护。
+ *
+ * 鉴权复用 storage 的 scope（storage:read / storage:write），
+ * 这样已有的业务 APIKey 不用重新签发。
+ */
+export const kvEntries = sqliteTable(
+  'kv_entries',
+  {
+    id: text('id').primaryKey(),
+    appId: text('app_id').notNull(),
+    /** 业务自定义键，支持 `/` 分层（如 class/ABC123/manifest.json） */
+    key: text('key').notNull(),
+    /** 原文存储，业务自行解释（通常是 JSON 字符串） */
+    value: text('value').notNull(),
+    sizeBytes: integer('size_bytes', { mode: 'number' }).notNull(),
+    /** 每次写入 +1，客户端可带 expectedVersion 做乐观锁 */
+    version: integer('version', { mode: 'number' }).notNull().default(1),
+    updatedAt: integer('updated_at', { mode: 'number' }).notNull(),
+    createdAt: integer('created_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [uniqueIndex('uq_kv_app_key').on(t.appId, t.key), index('idx_kv_app_key').on(t.appId, t.key)],
+);
+
 /* ---------------- P3：软件源 ---------------- */
 
 export const registryPackages = sqliteTable(

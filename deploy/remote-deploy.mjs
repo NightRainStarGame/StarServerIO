@@ -47,9 +47,14 @@ const tmpDir = join(repoRoot, '.deploy');
 mkdirSync(tmpDir, { recursive: true });
 const tgz = join(tmpDir, 'ssio-src.tgz');
 
-console.log('[1/7] 打包已提交内容（git archive，不含 node_modules / dist / data）');
-execFileSync('git', ['archive', '--format=tar.gz', '-o', tgz, 'HEAD'], { cwd: repoRoot });
-console.log(`      产物 ${(statSync(tgz).size / 1024).toFixed(0)} KB`);
+// --restart-only：只连上去重启服务（已经手工传过改动时用它，跳过打包/上传/构建）
+const restartOnly = !!args['restart-only'];
+
+if (!restartOnly) {
+  console.log('[1/7] 打包已提交内容（git archive，不含 node_modules / dist / data）');
+  execFileSync('git', ['archive', '--format=tar.gz', '-o', tgz, 'HEAD'], { cwd: repoRoot });
+  console.log(`      产物 ${(statSync(tgz).size / 1024).toFixed(0)} KB`);
+}
 
 if (args['dry-run']) {
   console.log('--dry-run：到此为止');
@@ -81,6 +86,22 @@ await new Promise((res, rej) => {
   });
 });
 console.log(`[2/7] 已连接 ${user}@${host}:${port}`);
+
+if (restartOnly) {
+  console.log('[restart-only] 跳过上传与构建，仅重启服务以加载最新代码');
+  if (useService) {
+    await sh('systemctl restart ssio', { sudo: true });
+    await new Promise((r) => setTimeout(r, 4000));
+    console.log('      服务状态: ' + (await sh('systemctl is-active ssio', { quiet: true, sudo: true })).trim());
+  } else {
+    await sh(`pkill -f 'packages/server/dist/index.js' || true`);
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  const ready = await sh(`curl -fsS -m 5 http://127.0.0.1:${ssioPort}/v1/readyz || echo FAIL`, { quiet: true });
+  console.log(`      readyz: ${ready.trim()}`);
+  conn.end();
+  process.exit(0);
+}
 
 const remoteTgz = '/tmp/ssio-src.tgz';
 
