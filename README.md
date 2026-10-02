@@ -1,236 +1,279 @@
-# StarServerIO (SSIO)
+# StarServerIO
 
-自托管的通用云后端中台（BaaS）。一套服务，多个应用共用：账号、文件存储、版本发行、卡密、公告、论坛、软件源。
+> 自托管的通用应用后端中台。**部署一套服务，多个应用共用**：账号体系、文件存储、版本发行、卡密、公告、论坛、包分发。
 
-本项目（StarServerIO）是**中台本体**；TaskManager 是它的第一个消费方。
+[![CI](https://github.com/NightRainStarGame/StarServerIO/actions/workflows/ci.yml/badge.svg)](https://github.com/NightRainStarGame/StarServerIO/actions/workflows/ci.yml)
 
-单体仓库（pnpm workspace），Node 22 + TypeScript，服务端 Fastify 5 + Drizzle ORM(SQLite)。
+桌面应用、移动应用、小工具在做到一定阶段后，都会反复需要同一批后端能力：让用户登录、存文件、发版本、卖激活码、推公告。为每个项目各写一遍既费时又容易各写各的错。SSIO 把这些能力抽成一套可自托管的服务，一个实例服务多个应用，应用之间数据完全隔离。
 
-> 当前阶段：**P1–P9 全部完成**（P8 只差持续运维项：仓库与 CI 已就位）。
-> 服务端能力齐了，首个消费方 TaskManager 已接入（可选更新源，默认关闭）。
->
-> SDK 一览（esbuild bundle + minify + gzip，`pnpm sdk:size` 复测）：
->
-> | 包 | gzip | 说明 |
-> |---|---|---|
-> | `@ssio/core` | 2.22 KB | 传输层：重试退避 / 401 并发去重续期 / 错误归一 / 分页迭代器 |
-> | `@ssio/web` | 2.76 KB | localStorage 持久化 + 并发分片上传（进度回调）；React hooks 走 `@ssio/web/react` 子路径（0.68 KB，React 为 optional peer） |
-> | `@ssio/node` | —（Node 端不计） | token 文件持久化 + 流式下载（断点续传 + sha256 校验）+ `createUpdater` 自动更新执行器 |
->
-> 示例：`examples/web-min`（浏览器 5 行接入）、`examples/electron-min`（Electron 窗口演示 1.2.3 → 1.3.0 更新全流程，服务端以独立 node 子进程内嵌）、`examples/node-e2e.ts`（`pnpm example:e2e` 全链路冒烟）。
+技术栈：Node 22 + TypeScript，服务端 Fastify 5 + Drizzle ORM（SQLite），单体仓库（pnpm workspace）。
 
-## 30 秒跑起来
+---
+
+## 特性
+
+| 能力 | 说明 |
+|---|---|
+| **版本发行** | 按平台 / 架构 / 渠道分发；灰度按百分比放量、可标记强制升级、可设最低版本；下载计数；下架为软删除 |
+| **文件存储** | 分片上传（默认 4 MiB，支持 1–16 MiB）、断点续传、服务端校验 sha256、相同内容秒传、配额控制、时效签名下载 URL（支持 Range） |
+| **卡密** | 批量生成（1 万张约 430 ms）、明文**仅在一次性导出链接中出现一次**、核销幂等（并发下只有一个"首次成功"）、可按掩码查状态 |
+| **公告** | 生效时间窗由服务端判定、置顶优先、等级（info/warning/critical）、Markdown 正文 |
+| **论坛** | 板块 → 帖子 → 回复；发帖与回复必须以用户身份，管理动作走应用凭证 |
+| **包分发** | `名称 + 版本 + 自定义元数据` 的通用包仓库，适合插件、资源包、依赖分发 |
+| **账号体系** | 应用内用户注册 / 登录 / 刷新（刷新令牌轮换制）、令牌内省接口 |
+| **多应用隔离** | 所有数据按应用隔离，跨应用访问一律返回 404 |
+
+配套：**Node / 浏览器 SDK**（含 React hooks）、**命令行工具**、**管理控制台**、**Capacitor 移动端示例**。
+
+---
+
+## 快速开始
 
 ```bash
-corepack enable            # 或 npm i -g pnpm
+corepack enable          # 或 npm i -g pnpm
 pnpm install
-cp packages/server/.env.example packages/server/.env
-# 编辑 .env：JWT_SECRET 至少 32 字符，MASTER_KEY 至少 16 字符（缺失或不达标会拒绝启动）
-pnpm dev                   # http://127.0.0.1:8100
+cp .env.example .env     # 至少设置 JWT_SECRET（≥32 字符）与 MASTER_KEY（≥16 字符）
+pnpm dev                 # http://127.0.0.1:8100
 ```
 
 验证：
 
 ```bash
 curl http://127.0.0.1:8100/v1/healthz    # {"ok":true,"version":"0.1.0","uptime":...}
-curl http://127.0.0.1:8100/v1/readyz     # {"ok":true,"db":true}，会真查一次数据库
+curl http://127.0.0.1:8100/v1/readyz     # {"ok":true,"db":true} —— 会真查一次数据库
 ```
+
+> 缺少必需环境变量或强度不达标时，服务**拒绝启动**，不提供不安全的默认值。
+> 完整的十分钟上手流程见 [`docs/05-快速上手.md`](docs/05-快速上手.md)。
+
+---
+
+## 鉴权模型
+
+三种凭据，各司其职：
+
+| 通道 | 请求头 | 用途 |
+|---|---|---|
+| Master Key | `X-Master-Key` | 平台管理员：创建应用、签发与吊销 API Key |
+| API Key | `X-API-Key` | 应用服务端：按 scope 调用业务接口 |
+| 用户 JWT | `Authorization: Bearer <access>` | 终端用户：访问自己的资源 |
+
+用户令牌由 API Key 通道签发（注册 / 登录），刷新令牌采用**轮换制**：每次刷新都颁发新令牌并作废旧令牌。业务后端需要确认令牌是否有效时，调用 `POST /v1/auth/introspect`（需 `auth:read`）。
+
+---
+
+## 客户端接入
+
+**Node / Electron**
+
+```ts
+import { createClient } from '@ssio/node';
+
+const client = await createClient({ baseUrl: 'https://ssio.example.com', apiKey: KEY });
+
+// 检查更新
+const latest = await client.releases.latest({
+  platform: 'win', arch: 'x64', channel: 'stable', current: '1.2.10',
+});
+if (latest.hasUpdate) {
+  // 流式下载，支持断点续传与 sha256 校验
+  await client.downloadToFile(latest.url, './update.exe', { sha256: latest.sha256 });
+}
+```
+
+**浏览器**
+
+```ts
+import { createClient } from '@ssio/web';
+
+const client = createClient({ baseUrl: 'https://ssio.example.com', apiKey: KEY });
+await client.uploadFile(file, { onProgress: (p) => console.log(p.percent) });
+```
+
+**React**
+
+```tsx
+import { useSsioUpload } from '@ssio/web/react';
+
+const { upload, progress, status } = useSsioUpload(client);
+```
+
+SDK 体积（esbuild + minify + gzip，`pnpm sdk:size` 复测）：
+
+| 包 | gzip | 说明 |
+|---|---|---|
+| `@ssio/core` | 2.22 KB | 传输层：重试退避、401 并发去重续期、429 处理、错误归一、分页迭代 |
+| `@ssio/web` | 2.76 KB | localStorage 持久化 + 并发分片上传；React hooks 在 `@ssio/web/react`（0.68 KB，React 为可选 peer） |
+| `@ssio/node` | — | 令牌文件持久化、流式下载（断点续传 + 校验）、`createUpdater` 更新执行器 |
+
+---
+
+## 命令行工具
+
+`@ssio/cli` 提供 `ssio` 命令，便于脚本化运维；所有命令支持 `--json`：
+
+```bash
+ssio config set --url http://127.0.0.1:8100 --master-key <key>   # 写入 ~/.ssio/config.json（0600）
+ssio app create myapp --name "我的应用"
+ssio key issue --app myapp --scopes release:write,release:read,storage:write
+ssio release publish --app myapp --version 1.0.0 --file ./Setup.exe --platform win --arch x64
+ssio release list --app myapp
+ssio card batch --app myapp --total 100 --days 30
+ssio announce post --app myapp --title "停服维护" --content-md "..." --pinned
+ssio quota --app myapp
+```
+
+环境变量 `SSIO_URL` / `SSIO_MASTER_KEY` / `SSIO_CONFIG` 优先于配置文件。
+
+> `--platform` 的合法值是 `win | linux | android | any`（不是 Node 的 `win32`）；查询最新版本时不传 `--arch` 会按 `any` 匹配，客户端应传自身架构。
+
+## 管理控制台
+
+`console/` 是一个 React + Vite 应用，用 Master Key 登录，覆盖应用列表、版本（发布 / 下架 / 调灰度）、
+卡密（生成 + 一次性导出）、公告、API Key（签发 / 吊销）。业务数据需要 API Key，
+控制台会引导签发一个仅存于浏览器本地的会话 Key。
+
+```bash
+pnpm console:dev    # 本地启动控制台（localhost:5173，需先启动服务端）
+```
+
+---
+
+## 部署
+
+**Docker（推荐）**
+
+```bash
+cp .env.example .env     # 填 JWT_SECRET / MASTER_KEY
+docker compose up -d     # 数据落在命名卷 ssio-data
+```
+
+另有裸机 systemd（`deploy/ssio.service`）与 Windows 服务（`deploy/install-windows.ps1`，基于 NSSM）两种方式；
+反向代理、自动备份、升级与运维清单见 [`docs/04-部署运维.md`](docs/04-部署运维.md)。
+
+**从本机一键部署到远程 Linux**
+
+```bash
+npm i ssh2    # 脚本按需加载，不进项目依赖
+node deploy/remote-deploy.mjs --host <域名/IP> --user ubuntu --key ~/.ssh/id_ed25519
+```
+
+脚本会以 `git archive` 打包**已提交内容**（不含 `node_modules` / `dist` / `data`，未提交的改动不会上生产），
+经 SFTP 上传后完成环境准备、依赖安装、构建、生成 `.env`、注册 systemd 与就绪自检，最后打印 Master Key。
+支持 `--password`、`--dir`、`--port-ssio`、`--no-service`、`--dry-run`。
+
+## 运维
+
+```bash
+pnpm backup --out /var/backups/ssio              # 在线备份，无需停服
+pnpm restore --from <备份目录> --force            # 默认拒绝覆盖，需显式 --force
+```
+
+备份使用 SQLite 的 `VACUUM INTO` 产出**一致性快照**（直接复制数据库文件在 WAL 模式下可能拿到不一致的副本）；
+恢复前会保留现有数据为 `.pre-restore-<时间戳>`，不会直接删除。
+
+监控端点：`GET /v1/healthz`（存活）与 `GET /v1/readyz`（就绪，含数据库检查）。
+
+---
+
+## 配置
+
+主要环境变量（完整清单见 [`.env.example`](.env.example)）：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `JWT_SECRET` | —（**必填**） | 令牌签名密钥，至少 32 字符 |
+| `MASTER_KEY` | —（**必填**） | 管理面主密钥，至少 16 字符 |
+| `HOST` | `127.0.0.1` | 容器部署需设为 `0.0.0.0` |
+| `PORT` | `8100` | 监听端口 |
+| `DATA_DIR` | `./data` | 数据库与存储对象的位置，**唯一需要备份的目录** |
+| `CORS_ORIGIN` | `*` | 浏览器直连时的跨域配置 |
+| `RATE_LIMIT_MAX` | `600` | 单 IP 每窗口请求上限（窗口由 `RATE_LIMIT_WINDOW_MS` 控制，默认 60 000 ms） |
+| `LOG_LEVEL` | `info` | 日志级别 |
+
+---
+
+## API 文档
+
+[`docs/03-API参考.md`](docs/03-API参考.md) 由源码**自动生成**（`pnpm gen:api-docs`），
+不会与实现脱节；`pnpm docs:check` 用于校验文档是否与当前路由一致，CI 会执行该检查。
+
+---
+
+## 性能
+
+以下数据来自 `scripts/bench/bench-100mb.mjs`（服务端与客户端分离进程，Windows 11 / Node 22 / 内置 NVMe）：
+
+| 场景 | 结果 |
+|---|---|
+| 100 MB 分片上传（25 × 4 MiB） | 端到端约 735 ms |
+| 服务端进程内存增量 | RSS +37 MB（堆内仅 21 MB，文件内容不进 JS 堆） |
+| 生成 10 000 张卡密并落库 | 约 430 ms |
+
+内存不是瓶颈，主要成本是合并与 sha256 计算（单核算力，约 300 ms / 100 MB）。
+
+---
+
+## 安全设计
+
+- **密钥不落库**：API Key 与卡密明文均只存储 sha256，明文仅在签发 / 导出响应中出现一次。
+- **多租户隔离**：所有查询按应用过滤，跨应用一律 404（不泄露资源是否存在）。
+- **签名下载 URL 有时效**：默认 300 秒，最长 3600 秒，过期即失效。
+- **卡密导出是一次性的**：导出后密文立即销毁，无法二次获取。
+- **启动即校验配置**：密钥强度不足直接拒绝启动，避免带默认密钥上线。
+- 生产环境建议：前置反向代理启用 TLS，并在防火墙侧限制来源。
+
+---
+
+## 设计取舍
+
+- **SQLite 单文件**：单机自托管场景足够，备份即复制文件；需要 PostgreSQL 时 Drizzle 层可整体替换。
+- **SQL 优先**：使用 Drizzle 而非 Prisma，不引入运行时魔法，迁移可读、可回滚。
+- **不用 bcrypt**：原生模块在部分平台编译困难，密码哈希采用 Node 内置 `scrypt`，参数编码进哈希串。
+- **集成测试走真实 HTTP 栈**：Supertest + 每用例独立临时库，覆盖鉴权、限流与错误映射，不触碰开发库。
+- **只做通用能力**：任何形如 `订单表`、`商品表` 的业务数据都不属于本项目。
+
+---
 
 ## 仓库结构
 
 ```
 packages/
-  shared/   共享层：错误码、scope 常量、semver 比较、API 类型（server 与 SDK 共用）
-  server/   服务端：Fastify 路由 + Drizzle(SQLite)，迁移在 drizzle/；@ssio/server/embed 供嵌入式复用
-  core/     @ssio/core     SDK 传输层（环境无关）
-  web/      @ssio/web      浏览器 SDK（React hooks 在 ./react 子路径）
-  node/     @ssio/node     Node/Electron SDK（下载/校验/updater）
-  cli/      @ssio/cli      ssio 命令行运维（建应用/发版/发卡/发公告）
-console/         管理控制台（React + Vite，Master Key 登录）
-mobile/          Capacitor 移动端壳（验证 @ssio/web 在真机 WebView 可用）
-examples/
-  web-min/        浏览器最小接入（import map + 静态服务）
-  electron-min/   Electron 更新演示（服务端内嵌为独立 node 子进程）
-  node-e2e.ts     SDK 版全链路冒烟
-scripts/
-  bench/          100MB 分片上传基准（服务端独立进程）
-  bundle-size.mjs SDK 体积测量
-  gen-api-docs.mjs 从源码提取路由生成 API 文档（--check 防漂移）
-deploy/
-  ssio.service            systemd 单元
-  install-windows.ps1     NSSM 注册 Windows 服务（含 readyz 自检）
-  uninstall-windows.ps1
-  remote-deploy.mjs       从本机一键部署到远程 Linux（SSH）
-docs/
-  03-API参考.md   自动生成（pnpm gen:api-docs），不要手改
-  04-部署运维.md   三种部署方式 + 备份恢复 + 运维清单
-  05-快速上手.md   10 分钟跑通：起服务 → 建应用 → 发版 → 拉更新 → 发卡 → 核销
+  shared/    共享层：错误码、scope 常量、semver、API 类型（服务端与 SDK 共用）
+  server/    服务端：Fastify 路由 + Drizzle(SQLite)，迁移在 drizzle/
+  core/      @ssio/core   SDK 传输层（环境无关）
+  web/       @ssio/web    浏览器 SDK（React hooks 在 @ssio/web/react）
+  node/      @ssio/node   Node / Electron SDK（下载、校验、更新执行器）
+  cli/       @ssio/cli    命令行工具
+console/     管理控制台（React + Vite）
+mobile/      Capacitor 移动端示例
+examples/    浏览器最小接入、Electron 更新演示、全链路冒烟脚本
+scripts/     性能基准、体积测量、API 文档生成
+deploy/      systemd 单元、Windows 服务脚本、一键远程部署脚本
+docs/        API 参考（自动生成）、部署运维、快速上手
 ```
 
-（P5 的 `console/` 与 `cli/` 已就位，无后续包计划。）
-
-## 鉴权模型（三通道）
-
-| 通道 | 头部 | 用途 |
-|---|---|---|
-| Master Key | `X-Master-Key` | 平台管理员：建应用、签发/吊销 APIKey |
-| API Key | `X-API-Key` | 应用服务端：带 scope 调用业务接口 |
-| 用户 JWT | `Authorization: Bearer <access>` | 终端用户：访问自己的资源 |
-
-用户 JWT 由 APIKey 通道签发（注册/登录），刷新令牌采用**轮换制**：每次 refresh 都换新并作废旧令牌。
-业务后端拿不准用户 JWT 是否有效时，用 `POST /v1/auth/introspect` 问一次（需 `auth:read` scope）。
-
-## 设计取向
-
-- **SQLite 单文件**：单机自托管场景够用，备份就是拷文件。需要换 Postgres 时 Drizzle 层可整体替换。
-- **SQL 优先**：用 Drizzle 而不是 Prisma，不引入运行时魔法，迁移可读可回滚。
-- **不用 bcrypt**：原生模块在 Windows 上编译易炸，密码哈希用 Node 内置 `scrypt`，参数编码进哈希串。
-- **集成测试打真实 HTTP 栈**：Supertest + 每个用例一个临时库，覆盖鉴权/限流/错误映射，不碰开发库。
-
-## 常用命令
+## 开发
 
 ```bash
-pnpm dev          # 开发（tsc 后直接跑 dist）
+pnpm dev          # 开发运行
 pnpm build        # 全包构建
 pnpm test         # 全包测试
-pnpm typecheck    # 全包类型检查（最便宜的验证）
-pnpm lint         # ESLint，--max-warnings 0
-pnpm db:generate  # drizzle-kit 生成迁移（禁止手写 CREATE TABLE）
-pnpm example:e2e  # 全链路冒烟（需先 pnpm build）：建应用 → 上传 → 发版 → 拉更新 → 下载校验 → 发卡 → 核销
-pnpm gen:api-docs # 从源码重新生成 docs/03-API参考.md（改了路由就要跑）
-pnpm docs:check   # 校验文档没漂移，CI 会跑
-pnpm backup       # 备份数据（VACUUM INTO 一致性快照，不用停服务）
-pnpm restore      # 恢复（默认拒绝覆盖，需 --from <备份目录> [--force]）
-pnpm console:dev  # 起管理控制台（localhost:5173，需先起服务端）
-pnpm cli -- release publish --app myapp --version 1.0.0 --file ./Setup.exe
+pnpm typecheck    # 全包类型检查
+pnpm lint         # ESLint（--max-warnings 0）
+pnpm db:generate  # 生成数据库迁移（请勿手写 CREATE TABLE）
+pnpm example:e2e  # 全链路冒烟（需先 build）
 ```
 
-## 控制台与 CLI
+CI 会执行类型检查、构建、测试、文档一致性校验与 lint。
 
-**CLI**（`@ssio/cli`，命令 `ssio`）用于脚本化运维，8 项端到端测试覆盖：
+## 文档
 
-```bash
-ssio config set --url http://127.0.0.1:8100 --master-key <key>   # 写 ~/.ssio/config.json（0600）
-ssio app create myapp --name "我的应用"
-ssio key issue --app myapp --scopes release:write,release:read,storage:write   # 签发后自动写入配置
-ssio release publish --app myapp --version 1.0.0 --file ./Setup.exe
-ssio release list --app myapp
-ssio card batch --app myapp --total 100 --days 30    # 输出一次性导出链接
-ssio announce post --app myapp --title "停服维护" --content-md "..." --pinned
-ssio quota --app myapp
-```
+- [`docs/03-API参考.md`](docs/03-API参考.md) — 全部接口与所需 scope（自动生成）
+- [`docs/04-部署运维.md`](docs/04-部署运维.md) — 部署方式、反向代理、备份恢复、运维清单
+- [`docs/05-快速上手.md`](docs/05-快速上手.md) — 从零跑通发行、存储、发卡、公告
+- [`packages/server/README.md`](packages/server/README.md) — 服务端实现细节与已记录的坑
 
-所有命令支持 `--json`；环境变量 `SSIO_URL` / `SSIO_MASTER_KEY` / `SSIO_CONFIG` 优先于配置文件。
+## 许可证
 
-**控制台**（`console/`，React + Vite）用于人工操作：Master Key 登录 → 应用列表 →
-版本（发布/下架/调灰度）、卡密（生成 + 一次性导出链接）、公告、APIKey（签发/吊销）。
-业务数据需要 APIKey，控制台会引导签发一个「会话 Key」存在浏览器本地。
-
-> CLI 里 `--platform` 的合法值是 `win | linux | android | any`（**不是** Electron 的 `win32`）；
-> `--arch` 同理。查询 `latest` 时不传 arch 会按 `any` 匹配，客户端应传自身架构。
-
-## 部署
-
-```bash
-cp .env.example .env      # 填 JWT_SECRET / MASTER_KEY（缺了拒绝启动）
-docker compose up -d      # 数据落在命名卷 ssio-data
-```
-
-另有裸机 systemd（`deploy/ssio.service`）与 Windows 服务（`deploy/install-windows.ps1`，NSSM）两条路。
-完整说明（反向代理、自动备份、升级、运维清单）见 [`docs/04-部署运维.md`](docs/04-部署运维.md)。
-
-### 从本机一键部署到远程 Linux
-
-```bash
-npm i ssh2    # 脚本按需加载，不进项目依赖
-node deploy/remote-deploy.mjs --host <域名/IP> --user ubuntu --password <密码>
-node deploy/remote-deploy.mjs --host <域名/IP> --user ubuntu --key ~/.ssh/id_ed25519 --dir /home/ubuntu/SSIO
-```
-
-它会：用 `git archive` 打包**已提交内容**（不含 node_modules/dist/data，本地未提交的改动不会偷偷上生产）
-→ SFTP 上传 → 装 Node 22 与 pnpm（走 npmmirror，国内服务器拉 GitHub 会超时）→ 装依赖（排除 electron-min）
-→ 构建 → 生成 `.env`（随机密钥）→ 注册 systemd → 打 `/v1/readyz` 自检 → 打印 Master Key。
-
-服务器需开放 SSH（22）；只支持公钥登录时传 `--key`。加 `--no-service` 可只用 nohup 起进程（无 root 时）。
-
-## 快速上手
-
-10 分钟跑通「建应用 → 发版 → 客户端拉更新 → 发卡 → 核销」，见 [`docs/05-快速上手.md`](docs/05-快速上手.md)。
-一句话版：
-
-```bash
-pnpm install && cp .env.example .env && pnpm build && pnpm dev
-pnpm cli -- app create myapp --name "我的应用"
-pnpm cli -- key issue --app myapp --scopes 'release:read,release:write,storage:read,storage:write'
-pnpm cli -- release publish --app myapp --version 1.0.0 --file ./Setup.exe --platform win --arch x64
-```
-
-## 设计红线
-
-1. **只做通用能力**。任何形如 `xxx_order` / `xxx_store` 的业务表都不属于 SSIO。
-2. **多租户隔离**：所有数据按 app 隔离，跨应用查询一律 404。
-3. **契约变更需报告**：`packages/shared/src/api.ts` 的字段改动会波及所有消费方。
-4. **密钥不落库**：APIKey 只存 sha256，明文仅在签发响应里出现一次。
-
-## 论坛与软件源
-
-**论坛**（`/v1/forum/*`）：板块 → 帖子 → 回复三层。权限划分是它的核心语义：
-
-| 操作 | 谁能做 | 为什么 |
-|---|---|---|
-| 浏览板块/帖子/回复 | APIKey（`forum:read`）或用户 JWT | 业务服务端要能聚合展示，用户要能浏览 |
-| **发帖 / 回复** | **必须是用户 JWT** | APIKey 代表应用而非人，拿它发帖会分不清「用户说的」和「应用说的」， moderation 也会失去依据 |
-| 建板块 / 置顶 / 锁帖 | APIKey（`forum:write`） | 用户不能给自己置顶 |
-
-帖子与板块计数在同一个事务里更新；楼层号由 `replyCount` 推导，天然连续。
-
-**软件源**（`/v1/registry/*`）：`name + version + 元数据` 的通用包分发，与「发行」的区别要分清：
-
-- `releases` 面向**应用更新**：有 platform/arch/灰度/minVersion，客户端拿它决定"要不要升"
-- `registry` 面向**包管理**：不认识平台、不做灰度，消费方自己解释 `meta` 字段（npm 式依赖、插件包、资源包都行）
-
-包体不单独存：复用 storage，`fileId` 指过去即可 —— 配额、秒传、签名下载全部白拿。
-版本**不可覆盖**（重复发同版本 → 409），`latest` 只按 semver 前进（回滚发布不会把 latest 拉回去）。
-
-## TaskManager 怎么用 SSIO（P9）
-
-TaskManager 的更新系统围绕 `latest.json` 清单工作（多源测速、增量补丁、备源镜像都建在上面）。
-SSIO 是 API 服务没有清单文件，所以适配层做的是**把 API 响应合成成一份清单文本** ——
-下游一行都不用改（见 `electron/updater/ssio.ts`）。
-
-在 TaskManager 的「设置 → 更新源」里添加：
-
-| 字段 | 值 |
-|---|---|
-| URL | `ssio+http://<你的 SSIO 地址>:8100`（`ssio+` 前缀是识别标记） |
-| 提取码 | APIKey（需要 `release:read`） |
-
-默认关闭：不配置 `ssio+` 源时，TaskManager 的更新行为与接入前**完全一致**。
-SSIO 不做增量补丁（`patches` 留空 → 走整包）；`mandatory` 映射为清单的 `force`。
-
-## 路线图
-
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| P1 | 服务端骨架：monorepo、认证、应用与 APIKey 管理 | 完成 |
-| P2 | 核心能力：版本发行、分片存储、发卡、公告 | 完成 |
-| P4 | 客户端 SDK：core / web / node（含 Electron 更新执行器） | 完成 |
-| P5 | 控制台与 CLI | 完成 |
-| P6 | 打包与部署：Docker / systemd / Windows 服务、备份恢复、API 文档生成 | 完成 |
-| P3 | 论坛与软件源 | 完成 |
-| P7 | Capacitor 移动端壳 | 完成 |
-| P8 | GitHub 仓库与 CI | 进行中 |
-| P9 | TaskManager 集成（首个消费方） | 完成 |
-
-## 环境变量
-
-见 [`packages/server/.env.example`](packages/server/.env.example)。缺少必需变量或长度不达标时服务**拒绝启动**，不提供不安全的默认值。
-
-## 环境提醒
-
-- 仓库位于 D 盘（USB 外接盘，有 Event 51 分页错误记录）。**每天收工前**请 `git push`，或同步一份到内置盘。
-- 若 `git push` 报 `Failed to connect to github.com:443`：多半是本机 hosts 被第三方加速工具劫持（把 `*.github.com` 指到 127.0.0.1），而配套的本地反代没在运行。此时改走 SSH 通道即可：
-
-  ```bash
-  git -c url."git@ssh.github.com:".insteadOf="https://github.com/" push origin main
-  ```
+[MIT](LICENSE)
