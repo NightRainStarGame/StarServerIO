@@ -1,7 +1,7 @@
 # SSIO API 参考
 
 > 本文件由 `pnpm gen:api-docs` 从 `packages/server/src/modules/*.ts` **自动生成**，不要手改。
-> 生成时间：2026-10-01T10:30:10.937Z | 路由总数：57
+> 生成时间：2026-10-09T01:31:30.377Z | 路由总数：62
 
 鉴权头：Master Key 用 `X-Master-Key`，APIKey 用 `X-API-Key`，用户用 `Authorization: Bearer <access>`。
 
@@ -13,7 +13,7 @@
 | GET | `/v1/announcements` | APIKey（announcements:read） |
 | GET | `/v1/announcements/active` | APIKey（announcements:read）或用户 JWT |
 | PATCH | `/v1/announcements/:id` | APIKey（announcements:write） |
-| DELETE | `/v1/announcements/:id` | APIKey（announcements:write） |
+| DELETE | `/v1/announcements/:id` | APIKey（announcements:delete） |
 
 ## APIKey（apikeys.ts）
 
@@ -21,6 +21,7 @@
 |---|---|---|
 | POST | `/v1/keys` | Master Key |
 | GET | `/v1/keys` | Master Key |
+| PATCH | `/v1/keys/:id` | Master Key |
 | DELETE | `/v1/keys/:id` | Master Key |
 
 ## 应用（apps.ts）
@@ -74,6 +75,15 @@
 | GET | `/v1/healthz` | 公开 |
 | GET | `/v1/readyz` | 公开 |
 
+## kv（kv.ts）
+
+| 方法 | 路径 | 鉴权 |
+|---|---|---|
+| GET | `/v1/kv` | APIKey（storage:read） |
+| PUT | `/v1/kv` | APIKey（storage:write） |
+| DELETE | `/v1/kv` | APIKey（storage:delete） |
+| GET | `/v1/kv/list` | APIKey（storage:read） |
+
 ## registry（registry.ts）
 
 | 方法 | 路径 | 鉴权 |
@@ -94,7 +104,7 @@
 | GET | `/v1/releases/latest` | APIKey（release:read） |
 | GET | `/v1/releases/:id` | APIKey（release:read） |
 | PATCH | `/v1/releases/:id` | APIKey（release:write） |
-| DELETE | `/v1/releases/:id` | APIKey（release:write） |
+| DELETE | `/v1/releases/:id` | APIKey（release:delete） |
 | POST | `/v1/releases/:id/download` | APIKey（release:read） |
 
 ## 存储（storage.ts）
@@ -107,7 +117,7 @@
 | DELETE | `/v1/storage/uploads/:id` | APIKey（storage:write） |
 | GET | `/v1/storage/files/:id` | APIKey（storage:read） |
 | GET | `/v1/storage/files/:id/download` | APIKey（storage:read） |
-| DELETE | `/v1/storage/files/:id` | APIKey（storage:write） |
+| DELETE | `/v1/storage/files/:id` | APIKey（storage:delete） |
 | GET | `/v1/storage/quota` | APIKey（storage:read） |
 | GET | `/v1/storage/raw/*` | 公开 |
 

@@ -174,7 +174,8 @@ export async function registerStorage(app: FastifyInstance, opts: ModuleOptions)
   app.delete(
     '/v1/storage/files/:id',
     {
-      preHandler: [app.requireApiKey({ scopes: ['storage:write'] })],
+      // 删除文件独立于写入：能上传的 Key 不一定该能删历史文件
+      preHandler: [app.requireApiKey({ scopes: ['storage:delete'] })],
       schema: {
         querystring: Type.Object({ force: Type.Optional(Type.Boolean()) }),
         response: { 200: Type.Object({ deleted: Type.Literal(true), id: Type.String() }) },

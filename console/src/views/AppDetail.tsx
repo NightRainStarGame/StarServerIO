@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   appApi,
   masterApi,
+  CONSOLE_SESSION_SCOPES,
   SCOPE_PRESETS,
   type AnnouncementRecord,
   type ApiKeyRecord,
@@ -31,7 +32,7 @@ export function AppDetail({
     const res = await masterApi(session.baseUrl, session.masterKey).keys.issue({
       appId: app.id,
       name: 'console-session',
-      scopes: SCOPE_PRESETS[3]!.scopes,
+      scopes: CONSOLE_SESSION_SCOPES,
     });
     onSessionChange({
       ...session,

@@ -160,7 +160,7 @@ export async function registerKv(app: FastifyInstance, opts: ModuleOptions): Pro
   app.delete(
     '/v1/kv',
     {
-      preHandler: [app.requireApiKey({ scopes: ['storage:write'] })],
+      preHandler: [app.requireApiKey({ scopes: ['storage:delete'] })],
       schema: {
         querystring: Type.Object({ key: Type.String({ minLength: 1, maxLength: MAX_KEY_LEN }) }),
         response: { 200: Type.Object({ deleted: Type.Boolean(), key: Type.String() }) },

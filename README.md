@@ -60,6 +60,32 @@ curl http://127.0.0.1:8100/v1/readyz     # {"ok":true,"db":true} —— 会真�
 
 用户令牌由 API Key 通道签发（注册 / 登录），刷新令牌采用**轮换制**：每次刷新都颁发新令牌并作废旧令牌。业务后端需要确认令牌是否有效时，调用 `POST /v1/auth/introspect`（需 `auth:read`）。
 
+### 权限分级：读 / 写 / 删
+
+API Key 的 scope 分三级，**写入不等于删除**：
+
+| 级别 | scope 举例 | 能做什么 |
+|---|---|---|
+| 读 | `release:read`、`storage:read` | 查询、检查更新、读取公告 |
+| 写 | `release:write`、`storage:write` | 创建与修改：发版本、上传文件、发公告、建板块 |
+| 删 | `release:delete`、`storage:delete`、`announcements:delete` | 下架版本、删除文件、删除公告、删除 KV |
+
+拆开的理由很实际：写入大多可重试（传错了再传一次），删除不是（下架的版本不会自己回来）。
+给 CI、外包或第三方发版用的 Key 只给 write，能挡住"发版脚本被误用成清理脚本"这类事故。
+跨级不放宽 —— 有 `storage:delete` 不代表能上传，删除权限不包含写权限。
+
+不属于删除动作的例外：`DELETE /v1/storage/uploads/:id`（放弃一次上传）仍只需 `storage:write`，
+它是上传流程里的取消步骤，不是删除已存在的数据。
+
+**升级时怎么给旧 Key 补权限**（权限拆分后，老 Key 会缺少新的 delete scope）：
+
+```bash
+ssio key scopes <keyId> --scopes release:read,release:write,release:delete
+```
+
+`PATCH /v1/keys/:id` 只改权限、不动明文，客户端无需换 Key —— 否则每次权限模型调整都意味着
+所有已分发的客户端要重新配置，代价远高于增加这条接口。
+
 ---
 
 ## 客户端接入
@@ -116,6 +142,7 @@ SDK 体积（esbuild + minify + gzip，`pnpm sdk:size` 复测）：
 ssio config set --url http://127.0.0.1:8100 --master-key <key>   # 写入 ~/.ssio/config.json（0600）
 ssio app create myapp --name "我的应用"
 ssio key issue --app myapp --scopes release:write,release:read,storage:write
+ssio key scopes <keyId> --scopes release:read,release:write,release:delete   # 给已有 Key 改权限（不改明文）
 ssio release publish --app myapp --version 1.0.0 --file ./Setup.exe --platform win --arch x64
 ssio release list --app myapp
 ssio card batch --app myapp --total 100 --days 30

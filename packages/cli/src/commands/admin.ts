@@ -106,6 +106,39 @@ export async function keyRevoke(ctx: Ctx, out: Out, args: string[]): Promise<voi
   out.info(`Key 已吊销：${id}`);
 }
 
+/**
+ * 调整已签发 Key 的 scope（不改明文，客户端不需要换 Key）。
+ *
+ * 存在意义：权限模型细化时（把 delete 从 write 里拆出来），老 Key 会突然缺权限，
+ * 而吊销重签意味着所有已分发的客户端都要更新 —— 这条命令是避免那种代价的迁移通道。
+ */
+export async function keyScopes(ctx: Ctx, out: Out, args: string[], flags: Flags): Promise<void> {
+  const id = args[0];
+  if (!id) throw new Error('用法：ssio key scopes <keyId> --scopes a,b [--name <名称>]');
+  const raw = str(flags, 'scopes');
+  const name = str(flags, 'name');
+  if (!raw && !name) throw new Error('至少给 --scopes 或 --name 之一');
+
+  const body: Record<string, unknown> = {};
+  if (raw) {
+    const scopes = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (scopes.length === 0) throw new Error('--scopes 为空');
+    body.scopes = scopes;
+  }
+  if (name) body.name = name;
+
+  const res = await ctx.master().masterRequest<{ id: string; scopes: string[]; masked: string }>(
+    'PATCH',
+    `/v1/keys/${id}`,
+    body,
+  );
+  out.info(`Key 已更新：${res.masked} (${res.id})`);
+  out.json(res);
+}
+
 /** 供测试与其它命令复用：拿一个「只带指定 scope」的一次性 client。 */
 export function ephemeralClient(url: string, apiKey: string): SsioClient {
   return createClient({ baseUrl: url, apiKey });

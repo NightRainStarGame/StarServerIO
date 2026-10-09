@@ -144,7 +144,8 @@ describe('Release 接口', () => {
     t = await createTestServer();
     const app = await createApp(t.request, t.masterKey, 'rel-app');
     appId = app.id;
-    apiKey = await issueKey(t.request, t.masterKey, { appId, scopes: ['storage:read', 'storage:write', 'release:read', 'release:write'] });
+    // 含 delete：下架版本与删除文件现在各自需要 release:delete / storage:delete
+    apiKey = await issueKey(t.request, t.masterKey, { appId, scopes: ['storage:read', 'storage:write', 'storage:delete', 'release:read', 'release:write', 'release:delete'] });
 
     // 先传一个文件，release 必须挂在真实文件上
     const init = await t.request

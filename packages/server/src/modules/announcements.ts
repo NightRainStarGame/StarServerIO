@@ -192,7 +192,7 @@ export async function registerAnnouncements(app: FastifyInstance, opts: ModuleOp
   app.delete(
     '/v1/announcements/:id',
     {
-      preHandler: [app.requireApiKey({ scopes: ['announcements:write'] })],
+      preHandler: [app.requireApiKey({ scopes: ['announcements:delete'] })],
       schema: { response: { 200: Type.Object({ deleted: Type.Literal(true), id: Type.String() }) } },
     },
     (req) => {

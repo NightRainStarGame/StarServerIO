@@ -32,7 +32,7 @@ const USAGE = `用法：ssio <命令> [子命令] [选项]
 应用与 Key（Master 通道）
   app list | app create <slug> [--name <n>] [--quota-mb <n>]
   key issue --app <slug> --scopes a,b [--name <n>] [--no-save]
-  key list | key revoke <keyId>
+  key list | key revoke <keyId> | key scopes <keyId> --scopes a,b [--name <n>]
 
 发行（APIKey 通道）
   release publish --app <slug> --version <x.y.z> --file <path>
@@ -81,7 +81,9 @@ export async function run(argv: string[]): Promise<number> {
             ? () => admin.keyList(ctx, out)
             : sub === 'revoke'
               ? () => admin.keyRevoke(ctx, out, rest)
-              : null;
+              : sub === 'scopes'
+                ? () => admin.keyScopes(ctx, out, rest, flags)
+                : null;
       break;
     case 'release':
       handler =

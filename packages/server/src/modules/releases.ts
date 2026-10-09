@@ -303,7 +303,8 @@ export async function registerReleases(app: FastifyInstance, opts: ModuleOptions
   app.delete(
     '/v1/releases/:id',
     {
-      preHandler: [app.requireApiKey({ scopes: ['release:write'] })],
+      // 下架是发布流程里代价最高的动作，单独要 release:delete
+      preHandler: [app.requireApiKey({ scopes: ['release:delete'] })],
       schema: { response: { 200: Type.Object({ deleted: Type.Literal(true), id: Type.String() }) } },
     },
     async (req) => {

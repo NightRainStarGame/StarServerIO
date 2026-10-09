@@ -142,6 +142,28 @@ describe('ssio CLI', () => {
     expect(out.lines.join('\n')).toMatch(/已用\(MB\)/);
   });
 
+  it('key scopes：改权限不动明文（旧 Key 迁移升级用）', async () => {
+    const before = await ctx.master().masterRequest<Array<{ id: string; scopes: string[]; masked: string }>>(
+      'GET',
+      '/v1/keys',
+    );
+    const target = before.find((k) => (k.scopes ?? []).includes('release:write'))!;
+    expect(target.scopes).not.toContain('release:delete');
+
+    const out = newOut();
+    await admin.keyScopes(ctx, out, [target.id], flags({ scopes: 'release:read,release:write,release:delete' }));
+    expect(out.lines.join('\n')).toContain('Key 已更新');
+
+    const after = await ctx.master().masterRequest<Array<{ id: string; scopes: string[]; masked: string }>>(
+      'GET',
+      '/v1/keys',
+    );
+    const row = after.find((k) => k.id === target.id)!;
+    expect(row.scopes).toContain('release:delete');
+    // 掩码不变 = 还是同一把 Key，客户端无需更换
+    expect(row.masked).toBe(target.masked);
+  });
+
   it('key revoke：吊销后原 Key 不再可用', async () => {
     const keys = await ctx.master().masterRequest<Array<{ id: string }>>('GET', '/v1/keys');
     const id = keys[0]!.id;

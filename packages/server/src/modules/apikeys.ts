@@ -32,6 +32,26 @@ const CreateKeyBody = Type.Object({
   expiresAt: Type.Optional(NullableInteger()),
 });
 
+const UpdateKeyBody = Type.Object({
+  name: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  scopes: Type.Optional(Type.Array(Type.String(), { minItems: 1 })),
+});
+
+function toKeyRecord(r: typeof apiKeys.$inferSelect) {
+  return {
+    id: r.id,
+    appId: r.appId,
+    name: r.name,
+    keyPrefix: r.keyPrefix,
+    masked: maskApiKey(r.keyPrefix),
+    scopes: r.scopes,
+    expiresAt: r.expiresAt,
+    lastUsedAt: r.lastUsedAt,
+    revokedAt: r.revokedAt,
+    createdAt: r.createdAt,
+  };
+}
+
 /**
  * APIKey 签发 / 列表 / 吊销。
  *
@@ -127,6 +147,47 @@ export async function registerApiKeys(app: FastifyInstance, opts: ModuleOptions)
         revokedAt: r.revokedAt,
         createdAt: r.createdAt,
       }));
+    },
+  );
+
+  // 调整已签发 Key 的 scope。存在意义：权限模型细化时（例如把 delete 从 write 里
+  // 拆出来）老 Key 会突然缺少新 scope，必须有一条不改明文、只补权限的迁移通道，
+  // 否则只能吊销重签 —— 而重签意味着所有客户端都要换 Key。
+  app.patch(
+    '/v1/keys/:id',
+    {
+      preHandler: [app.requireMaster()],
+      schema: { body: UpdateKeyBody, response: { 200: KeySchema } },
+    },
+    async (req) => {
+      const id = (req.params as { id: string }).id;
+      const body = req.body as { name?: string; scopes?: string[] };
+      const row = db.select().from(apiKeys).where(eq(apiKeys.id, id)).get();
+      if (!row) throw new AppError('NOT_FOUND', 'APIKey 不存在');
+      if (row.revokedAt !== null) throw new AppError('CONFLICT', 'APIKey 已被吊销，无法调整');
+
+      if (body.scopes) {
+        const unknown = validateScopes(body.scopes);
+        if (unknown.length > 0) throw new AppError('VALIDATION', '存在未知 scope', { unknown });
+      }
+
+      const patch: Partial<typeof apiKeys.$inferInsert> = {};
+      if (body.name !== undefined) patch.name = body.name;
+      if (body.scopes !== undefined) patch.scopes = body.scopes;
+      if (Object.keys(patch).length === 0) return toKeyRecord(row);
+
+      db.update(apiKeys).set(patch).where(eq(apiKeys.id, id)).run();
+      writeAudit(db, {
+        appId: row.appId,
+        actorType: 'master',
+        action: 'key.update',
+        target: id,
+        ip: req.ip,
+        meta: { keyPrefix: row.keyPrefix, scopesBefore: row.scopes, scopesAfter: patch.scopes ?? row.scopes },
+      });
+
+      const updated = db.select().from(apiKeys).where(eq(apiKeys.id, id)).get();
+      return toKeyRecord(updated!);
     },
   );
 

@@ -142,10 +142,47 @@ export function masterApi(baseUrl: string, masterKey: string) {
   };
 }
 
-/** 常用 scope 清单：签发 Key 时的快捷勾选。 */
+/**
+ * 常用 scope 清单：签发 Key 时的快捷勾选。
+ *
+ * 「可写」与「可删」刻意分开：发版用的 Key 不该顺带拥有下架历史版本的能力，
+ * 误删已发布版本的代价远高于误发一个新版本。
+ */
 export const SCOPE_PRESETS: Array<{ label: string; scopes: string[] }> = [
   { label: '只读（更新检查 + 公告）', scopes: ['release:read', 'announcements:read'] },
-  { label: '发版', scopes: ['release:read', 'release:write', 'storage:read', 'storage:write'] },
+  { label: '发版（可写，不可删）', scopes: ['release:read', 'release:write', 'storage:read', 'storage:write'] },
+  { label: '发版 + 下架', scopes: ['release:read', 'release:write', 'release:delete', 'storage:read', 'storage:write'] },
   { label: '卡密核销', scopes: ['cards:redeem'] },
-  { label: '控制台全量', scopes: ['release:read', 'release:write', 'storage:read', 'storage:write', 'cards:redeem', 'announcements:read', 'announcements:write', 'admin:read', 'admin:write'] },
+  {
+    label: '控制台全量（含删除）',
+    scopes: [
+      'auth:read',
+      'users:read',
+      'release:read',
+      'release:write',
+      'release:delete',
+      'storage:read',
+      'storage:write',
+      'storage:delete',
+      'forum:read',
+      'forum:write',
+      'cards:redeem',
+      'source:read',
+      'source:write',
+      'announcements:read',
+      'announcements:write',
+      'announcements:delete',
+      // 必须是 `admin:*`：SCOPES 里没有 admin:read / admin:write 这两个值，
+      // 写错会让签发直接报「未知 scope」
+      'admin:*',
+    ],
+  },
 ];
+
+/**
+ * 控制台自己用的会话 Key 所需的 scope。
+ * 单独导出而不是按下标取 SCOPE_PRESETS[3]：顺序一改就会签错权限，且这类错误很安静。
+ */
+export const CONSOLE_SESSION_SCOPES: string[] =
+  SCOPE_PRESETS.find((p) => p.label.startsWith('控制台全量'))?.scopes ??
+  SCOPE_PRESETS[SCOPE_PRESETS.length - 1]!.scopes;

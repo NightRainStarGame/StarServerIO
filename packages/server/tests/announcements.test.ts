@@ -13,7 +13,8 @@ describe('公告', () => {
     const app = await createApp(t.request, t.masterKey, 'news-app');
     apiKey = await issueKey(t.request, t.masterKey, {
       appId: app.id,
-      scopes: ['announcements:read', 'announcements:write'],
+      // 含 announcements:delete：删除公告已不归 write 管（见 delete-scope.test.ts）
+      scopes: ['announcements:read', 'announcements:write', 'announcements:delete'],
     });
   });
 

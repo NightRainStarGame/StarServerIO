@@ -9,8 +9,12 @@ export const SCOPES = [
   'users:read',
   'release:read',
   'release:write',
+  // 删除（下架）与写入分开：发版用的 Key 往往只需要「能传能发」，
+  // 不该顺带拥有把历史版本下架的能力 —— 误删版本的代价远高于误发一个版本。
+  'release:delete',
   'storage:read',
   'storage:write',
+  'storage:delete',
   'forum:read',
   'forum:write',
   'cards:redeem',
@@ -18,6 +22,7 @@ export const SCOPES = [
   'source:write',
   'announcements:read',
   'announcements:write',
+  'announcements:delete',
   'admin:*',
 ] as const;
 
