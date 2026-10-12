@@ -191,6 +191,30 @@ async function acceptBearerApiKey(req: FastifyRequest): Promise<void> {
   }
 }
 
+/* ────────────────────────── 内置通道（embedded） ────────────────────────── */
+
+/** 内置通道限流窗口：固定一分钟（`AI_EMBEDDED_RATE_LIMIT_MAX` 的语义就是「次/分钟」）。 */
+const EMBEDDED_WINDOW_MS = 60_000;
+/** 内置通道的 max_tokens 硬上限。带 Key 的调用不受此限制（信任等级不同）。 */
+const EMBEDDED_MAX_TOKENS = 4096;
+
+function hasApiKeyHeader(req: FastifyRequest): boolean {
+  const v = req.headers['x-api-key'];
+  const first = Array.isArray(v) ? v[0] : v;
+  return typeof first === 'string' && first.length > 0;
+}
+
+/**
+ * 北京时间「今天零点」的 epoch 毫秒。
+ *
+ * 配额按北京时间滚动不是偏爱国内用户，而是运营者（我们）的账单日就是北京时间 ——
+ * 「今天花了多少」必须和人对账单的直觉一致，否则配额页面永远差 8 小时。
+ */
+function beijingDayStart(now = Date.now()): number {
+  const BJ_OFFSET_MS = 8 * 3_600_000;
+  return Math.floor((now + BJ_OFFSET_MS) / 86_400_000) * 86_400_000 - BJ_OFFSET_MS;
+}
+
 /* ────────────────────────── 工具 ────────────────────────── */
 
 /**
@@ -238,7 +262,13 @@ const ChatBody = Type.Object({
   ),
   stream: Type.Optional(Type.Boolean()),
   temperature: Type.Optional(Type.Number({ minimum: 0, maximum: 2 })),
-  max_tokens: Type.Optional(Type.Integer({ minimum: 1, maximum: 32_000 })),
+  /**
+   * 上限放宽到 1_000_000 是**故意的**：schema 校验跑在 preHandler（embedded 判定）之前，
+   * 若在这里卡 32_000，内置通道的 max_tokens=100000 会在进 handler 前就被 400 掉，
+   * 「强制压到 4096」永远轮不到执行。真正的上限在 handler 里按身份分别施加：
+   * embedded → 4096（截断）；带 Key → 32_000（超过报 400，维持既有行为）。
+   */
+  max_tokens: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
 });
 
 const UsageQuery = Type.Object({
@@ -293,22 +323,108 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
     return price;
   }
 
+  /* ──────────────────── 内置通道：白名单 / 配额 ──────────────────── */
+
+  /** 进程启动时解析一次。空数组 = 内置通道整体关闭。 */
+  const embeddedSlugs = config.AI_EMBEDDED_APPS.split(',').map((s) => s.trim()).filter(Boolean);
+
+  /**
+   * slug → appId。任何失败（没传 / 不在白名单 / 白名单里有但 apps 表没有）统一返回 null，
+   * 调用方一律回 **401 + 固定文案「未授权」** —— 不区分「app 不存在」和「未开放内置通道」，
+   * 否则攻击者可以用错误信息逐个探测哪些 app 开了白名单。
+   */
+  function resolveEmbeddedSlug(slug: string | undefined): string | null {
+    if (!slug || embeddedSlugs.length === 0) return null;
+    if (!embeddedSlugs.includes(slug)) return null;
+    const row = db.select({ id: apps.id }).from(apps).where(eq(apps.slug, slug)).get();
+    return row?.id ?? null;
+  }
+
+  /**
+   * 该 app 今天（北京时间）内置通道已用 token 数。
+   *
+   * 口径：只统计 `keyId='embedded'` 的行 —— 带 Key 的调用是已认证流量，
+   * 有自己的信任等级和限流，不该占用「匿名通道」的配额。
+   * 注意这里是「事后账」：用量经队列落库（默认 1s 延迟），并发请求可能小幅超额 ——
+   * 对防滥用足够，精确性由带 Key 路径保证。
+   */
+  function embeddedTokensUsedToday(appId: string): number {
+    const row = db
+      .select({ used: sql<number>`coalesce(sum(${aiUsage.totalTokens}), 0)` })
+      .from(aiUsage)
+      .where(and(eq(aiUsage.appId, appId), eq(aiUsage.keyId, 'embedded'), gte(aiUsage.createdAt, beijingDayStart())))
+      .get();
+    return row?.used ?? 0;
+  }
+
+  /**
+   * 无 Key 请求的 chat 鉴权：白名单 + IP 限流 + 日配额，三关全过才放行。
+   * 通过后 `req.ctx` 与 APIKey 请求形状一致（appId/keyId 都有），
+   * 下游记账、用量查询不需要知道流量来自哪条通道。
+   */
+  function authorizeEmbeddedChat(req: FastifyRequest): void {
+    const body = req.body as AiChatRequest | undefined;
+    const appId = resolveEmbeddedSlug(body?.app);
+    if (appId === null) throw new AppError('UNAUTHORIZED', '未授权');
+
+    // 限流按 IP+slug 分桶：无 Key 请求没有可信身份，IP 是唯一抓手；
+    // 桶键带 slug 是为了「同一 IP 上多个内置 app」不互相挤占。
+    const bucket = `embedded:${req.ip}:${body!.app}`;
+    const hits = hitAiLimit(bucket, config.AI_EMBEDDED_RATE_LIMIT_MAX, EMBEDDED_WINDOW_MS);
+    if (hits > config.AI_EMBEDDED_RATE_LIMIT_MAX) {
+      throw new AppError('RATE_LIMITED', `内置通道每分钟最多 ${config.AI_EMBEDDED_RATE_LIMIT_MAX} 次`, {
+        limit: config.AI_EMBEDDED_RATE_LIMIT_MAX,
+        windowMs: EMBEDDED_WINDOW_MS,
+      });
+    }
+
+    const used = embeddedTokensUsedToday(appId);
+    if (used >= config.AI_EMBEDDED_DAILY_TOKENS) {
+      throw new AppError('AI_QUOTA_EXCEEDED', `今日 token 配额已用尽（${config.AI_EMBEDDED_DAILY_TOKENS}/天）`, {
+        limit: config.AI_EMBEDDED_DAILY_TOKENS,
+        used,
+        resetAt: beijingDayStart() + 86_400_000,
+      });
+    }
+
+    req.ctx = { authType: 'embedded', appId, keyId: 'embedded', scopes: ['ai:chat'] };
+  }
+
+  /** 无 Key 请求的 usage 鉴权：必须显式带 `?app=<白名单 slug>`，只能看自己 app 的聚合。 */
+  function authorizeEmbeddedUsage(req: FastifyRequest): void {
+    const q = req.query as { app?: string };
+    const appId = resolveEmbeddedSlug(q.app);
+    if (appId === null) throw new AppError('UNAUTHORIZED', '未授权');
+    req.ctx = { authType: 'embedded', appId, keyId: 'embedded', scopes: ['ai:read'] };
+  }
+
   /* ════════════════════════════════════════════════════════════════
      POST /v1/ai/chat/completions —— 流式代理
      ════════════════════════════════════════════════════════════════ */
+  const requireChatKey = app.requireApiKey({ scopes: ['ai:chat'] });
   app.post(
     '/v1/ai/chat/completions',
     {
       preHandler: [
         acceptBearerApiKey,
-        app.requireApiKey({ scopes: ['ai:chat'] }),
-        async (req: FastifyRequest) => {
+        /**
+         * 双通道分派：无 Key 走 embedded 白名单；有 Key 走原有 `requireApiKey` 路径
+         * （同一个插件函数，从数组挪进分派器，行为不变）。不能把 `requireApiKey`
+         * 留在数组里 —— 它对无 Key 请求抛 401，embedded 分支永远轮不到。
+         */
+        async (req: FastifyRequest, reply) => {
+          if (!hasApiKeyHeader(req)) {
+            authorizeEmbeddedChat(req);
+            return;
+          }
+          await requireChatKey(req, reply);
+          // 带 Key：按 app 限流（既有行为）
           const hits = hitAiLimit(req.ctx.appId!, config.AI_RATE_LIMIT_MAX, config.AI_RATE_LIMIT_WINDOW_MS);
           if (hits > config.AI_RATE_LIMIT_MAX) {
             throw new AppError('RATE_LIMITED', `AI 调用过于频繁：每 ${config.AI_RATE_LIMIT_WINDOW_MS / 1000} 秒最多 ${config.AI_RATE_LIMIT_MAX} 次`, {
               limit: config.AI_RATE_LIMIT_MAX,
-          windowMs: config.AI_RATE_LIMIT_WINDOW_MS,
-          });
+              windowMs: config.AI_RATE_LIMIT_WINDOW_MS,
+            });
           }
         },
       ],
@@ -322,6 +438,17 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
       }
       if (!(ALLOWED_MODELS as readonly string[]).includes(body.model)) {
         throw new AppError('AI_MODEL_NOT_ALLOWED', `模型 ${body.model} 未开放`, { allowed: ALLOWED_MODELS });
+      }
+
+      // max_tokens 按身份分别施加上限（schema 已放宽到 1_000_000，原因见 ChatBody 注释）：
+      // - embedded：**截断到 4096**，不报错 —— 匿名端调用方不该被要求了解我们的内部上限
+      // - 带 Key：超 32_000 报 400，维持既有行为
+      if (body.max_tokens !== undefined && body.max_tokens > EMBEDDED_MAX_TOKENS) {
+        if (req.ctx.authType === 'embedded') {
+          body.max_tokens = EMBEDDED_MAX_TOKENS;
+        } else if (body.max_tokens > 32_000) {
+          throw new AppError('VALIDATION', 'max_tokens 超过上限 32000', { field: 'max_tokens', max: 32_000 });
+        }
       }
 
       const startedAt = Date.now();
@@ -526,9 +653,23 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
   /* ════════════════════════════════════════════════════════════════
      GET /v1/ai/usage —— 用量聚合
      ════════════════════════════════════════════════════════════════ */
+  const requireUsageKey = app.requireApiKey({ scopes: ['ai:read'] });
   app.get(
     '/v1/ai/usage',
-    { preHandler: [acceptBearerApiKey, app.requireApiKey({ scopes: ['ai:read'] })], schema: { querystring: UsageQuery } },
+    {
+      preHandler: [
+        acceptBearerApiKey,
+        /** 双通道分派：无 Key 走 embedded（必须显式带 `?app=<白名单 slug>`）；有 Key 走原有路径。 */
+        async (req: FastifyRequest, reply) => {
+          if (!hasApiKeyHeader(req)) {
+            authorizeEmbeddedUsage(req);
+            return;
+          }
+          await requireUsageKey(req, reply);
+        },
+      ],
+      schema: { querystring: UsageQuery },
+    },
     async (req: FastifyRequest) => {
       const q = req.query as {
         app?: string;
@@ -613,6 +754,11 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
       };
 
       if (String(q.detail ?? '') === '1') {
+        // 明细（哪把 Key、延迟多少、错误码）只给真 Key 看：embedded 的调用方是匿名客户端，
+        // 给它明细等于把 app 的内部运营数据摊给任何人。
+        if (req.ctx.authType === 'embedded') {
+          throw new AppError('FORBIDDEN', '内置通道只支持聚合用量，不支持明细查询');
+        }
         const detailRows = db
           .select()
           .from(aiUsage)

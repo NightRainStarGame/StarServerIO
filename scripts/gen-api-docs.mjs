@@ -45,6 +45,11 @@ const MODULE_LABELS = {
  * 故意不做静默兜底（静默兜底 = 文档悄悄失真，而这是最容易骗过 code review 的一类 bug）。
  */
 const AUTH_PATTERNS = [
+  // AI 网关的双通道分派器：带 Key 走 requireApiKey，无 Key 走 embedded 白名单。
+  // 必须排在通用 requireApiKey 模式之前 —— 否则窗口里会先撞上分派器内部的
+  // `requireChatKey(...)` 调用别名，把「还接受无 Key」这个关键信息从文档里挤掉。
+  [/authorizeEmbeddedChat\(/, () => 'APIKey（ai:chat）或内置通道（AI_EMBEDDED_APPS 白名单 app，无 Key）'],
+  [/authorizeEmbeddedUsage\(/, () => 'APIKey（ai:read）或内置通道（AI_EMBEDDED_APPS 白名单 app，无 Key，仅聚合）'],
   [
     /requireApiKey\(\{[^}]*scopes:\s*\[([^\]]*)\]/,
     (m) => {

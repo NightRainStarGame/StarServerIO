@@ -20,6 +20,12 @@ export const ERROR_DEFS = {
   /** 模型不在白名单里。独立成码而非复用 VALIDATION：客户端要据此提示「换个模型」，而不是「参数写错了」。 */
   AI_MODEL_NOT_ALLOWED: { httpStatus: 400, message: '该模型未开放' },
   RATE_LIMITED: { httpStatus: 429, message: '请求过于频繁' },
+  /**
+   * AI 内置通道的日配额用尽。
+   * 不复用 `QUOTA_EXCEEDED`（那是存储配额，507）：429 才是「等等（明天）就好」的语义，
+   * 且客户端要靠 `details.resetAt` 决定提示文案，两者不该混在一个码上。
+   */
+  AI_QUOTA_EXCEEDED: { httpStatus: 429, message: 'AI 日配额已用尽' },
   // 5xx
   QUOTA_EXCEEDED: { httpStatus: 507, message: '存储配额不足' },
   /** 上游没配凭据。503 而非 500：这是「暂时不可用」，配好 key 重启即恢复。 */

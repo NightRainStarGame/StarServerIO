@@ -7,7 +7,8 @@ import type { StorageService } from './storage/service.js';
 
 /** 一次请求的认证上下文，由鉴权插件写入。 */
 export interface RequestContext {
-  authType: 'anonymous' | 'apikey' | 'user' | 'master';
+  /** `embedded`：AI 内置通道（无 APIKey，slug 白名单放行，见 modules/ai.ts）。 */
+  authType: 'anonymous' | 'apikey' | 'user' | 'master' | 'embedded';
   appId?: string;
   keyId?: string;
   scopes: string[];

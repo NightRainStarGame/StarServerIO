@@ -1,7 +1,7 @@
 # SSIO API 参考
 
 > 本文件由 `pnpm gen:api-docs` 从 `packages/server/src/modules/*.ts` **自动生成**，不要手改。
-> 生成时间：2026-10-12T10:20:21.650Z | 路由总数：66
+> 生成时间：2026-10-12T14:01:54.079Z | 路由总数：66
 
 鉴权头：Master Key 用 `X-Master-Key`，APIKey 用 `X-API-Key`，用户用 `Authorization: Bearer <access>`。
 
@@ -9,8 +9,8 @@
 
 | 方法 | 路径 | 鉴权 |
 |---|---|---|
-| POST | `/v1/ai/chat/completions` | APIKey（ai:chat） |
-| GET | `/v1/ai/usage` | APIKey（ai:read） |
+| POST | `/v1/ai/chat/completions` | APIKey（ai:chat）或内置通道（AI_EMBEDDED_APPS 白名单 app，无 Key） |
+| GET | `/v1/ai/usage` | APIKey（ai:read）或内置通道（AI_EMBEDDED_APPS 白名单 app，无 Key，仅聚合） |
 | GET | `/v1/ai/models` | APIKey（ai:read） |
 | PATCH | `/v1/ai/models/:model` | Master Key |
 

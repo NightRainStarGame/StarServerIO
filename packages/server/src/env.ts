@@ -33,6 +33,18 @@ const EnvSchema = z.object({
   AI_UPSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
   /** 用量队列的落盘间隔（毫秒）。测试会把它调到很小，让断言不用等真实的一秒。 */
   AI_USAGE_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().default(1000),
+  /**
+   * ── 内置通道（embedded）──
+   *
+   * 白名单内的 app 可以**不带任何 APIKey** 调 `/v1/ai/chat/completions`
+   * （`body.app` 作为 slug 判定），凭据彻底收敛在服务端。
+   * 空字符串 = 内置通道整体关闭（默认），此时无 Key 一律 401。
+   */
+  AI_EMBEDDED_APPS: z.string().default(''),
+  /** 内置通道限流：次 / 分钟，按 IP+slug 分桶（无 Key 请求没有可信身份，IP 是唯一抓手）。 */
+  AI_EMBEDDED_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(20),
+  /** 内置通道日配额：token / 天 / app，按北京时间自然日滚动。防的是「Key 泄露被换成白名单滥用」。 */
+  AI_EMBEDDED_DAILY_TOKENS: z.coerce.number().int().positive().default(2_000_000),
   CORS_ORIGIN: z.string().default('*'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });

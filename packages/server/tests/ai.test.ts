@@ -2,6 +2,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { request as httpRequest } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApp, createTestServer, issueKey, type TestServer } from './helpers.js';
+// embedded 的限流桶键是 `IP:slug`，跨用例不变 —— 必须显式复位，否则后面的用例会被前面用例的计数误伤
+import { resetAiRateLimitBuckets } from '../src/modules/ai.js';
 
 /**
  * AI 网关（DeepSeek 代理 + 用量统计）
@@ -126,22 +128,24 @@ async function startFakeUpstream(): Promise<FakeUpstream> {
 /** 直接打真实 HTTP（supertest 对 SSE 流式响应不好处理）。 */
 function postChat(
   port: number,
-  apiKey: string,
+  /** `null` = 不带任何凭据（内置通道的调用方式）。 */
+  apiKey: string | null,
   body: Record<string, unknown>,
   opts: { abortAfterFirstChunk?: boolean } = {},
 ): Promise<{ status: number; frames: string[]; raw: string }> {
   return new Promise((resolve, reject) => {
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      accept: 'text/event-stream',
+    };
+    if (apiKey !== null) headers['x-api-key'] = apiKey;
     const req = httpRequest(
       {
         host: '127.0.0.1',
         port,
         path: '/v1/ai/chat/completions',
         method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'content-type': 'application/json',
-          accept: 'text/event-stream',
-        },
+        headers,
       },
       (res) => {
         let raw = '';
@@ -496,5 +500,193 @@ describe('AI 网关', () => {
     expect(last.body.error.code).toBe('RATE_LIMITED');
 
     limited.cleanup();
+  });
+});
+
+/* ═════════════════════════════════════════════════════════════════════
+   内置通道（embedded）：无 Key 调用
+   ═════════════════════════════════════════════════════════════════════ */
+
+describe('AI 内置通道（无 Key）', () => {
+  let t: TestServer;
+  let up: FakeUpstream;
+  let bigfishAppId: string;
+  let otherKey: string;
+
+  const chatBody = {
+    app: 'bigfish',
+    model: 'deepseek-flash',
+    stream: true,
+    messages: [{ role: 'user', content: '你好' }],
+  };
+
+  beforeEach(async () => {
+    // 桶键 `embedded:127.0.0.1:bigfish` 跨用例恒定，不复位会让限流用例互相污染
+    resetAiRateLimitBuckets();
+    up = await startFakeUpstream();
+    t = await createTestServer({
+      DEEPSEEK_API_KEY: 'sk-test-not-a-real-key',
+      DEEPSEEK_BASE_URL: `http://127.0.0.1:${up.port}`,
+      AI_USAGE_FLUSH_INTERVAL_MS: '20',
+      AI_EMBEDDED_APPS: 'bigfish',
+      AI_EMBEDDED_RATE_LIMIT_MAX: '3',
+    });
+    const bigfish = await createApp(t.request, t.masterKey, 'bigfish', '大肥鱼');
+    bigfishAppId = bigfish.id;
+    const other = await createApp(t.request, t.masterKey, 'other-app', '别的应用');
+    otherKey = await issueKey(t.request, t.masterKey, { appId: other.id, name: 'other', scopes: ['ai:chat', 'ai:read'] });
+  });
+
+  afterEach(async () => {
+    await up.close();
+    await t.cleanup();
+  });
+
+  const serverPort = (): number => (t.app.server.address() as { port: number }).port;
+
+  it('无 Key + app=bigfish → 200 流式 + usage + [DONE]，记账 key_id=embedded', async () => {
+    const res = await postChat(serverPort(), null, chatBody);
+    expect(res.status).toBe(200);
+
+    const parsed = res.frames.map((f) => (f === '[DONE]' ? '[DONE]' : JSON.parse(f)));
+    const contents = parsed
+      .filter((f) => typeof f !== 'string' && f.choices?.[0]?.delta?.content)
+      .map((f: { choices: Array<{ delta: { content: string } }> }) => f.choices[0].delta.content);
+    expect(contents.join('')).toBe(DUMMY_TEXT.join(''));
+
+    const doneIdx = parsed.indexOf('[DONE]');
+    const usageIdx = parsed.findIndex((f) => typeof f !== 'string' && f.usage);
+    expect(usageIdx).toBeGreaterThan(-1);
+    expect(doneIdx).toBeGreaterThan(usageIdx);
+    const usageFrame = parsed[usageIdx] as { usage: Record<string, number> };
+    expect(usageFrame.usage.total_tokens).toBe(20);
+
+    await sleep(80); // 等队列 flush（间隔 20ms）
+    const row = t.sqlite
+      .prepare('select app_id, key_id, status, total_tokens from ai_usage order by created_at desc limit 1')
+      .get() as { app_id: string; key_id: string; status: string; total_tokens: number };
+    expect(row.app_id).toBe(bigfishAppId);
+    expect(row.key_id).toBe('embedded');
+    expect(row.status).toBe('ok');
+    expect(row.total_tokens).toBe(20);
+  });
+
+  it('无 Key + app 不存在 / 非白名单 / 缺 app → 一律 401，且不泄露白名单内容', async () => {
+    const notExist = await postChat(serverPort(), null, { ...chatBody, app: 'no-such-app' });
+    expect(notExist.status).toBe(401);
+
+    // other-app 真实存在但不在白名单里
+    const notListed = await postChat(serverPort(), null, { ...chatBody, app: 'other-app' });
+    expect(notListed.status).toBe(401);
+
+    const noApp = await postChat(serverPort(), null, { model: 'deepseek-flash', stream: true, messages: [{ role: 'user', content: '你好' }] });
+    expect(noApp.status).toBe(401);
+
+    for (const res of [notExist, notListed, noApp]) {
+      const body = JSON.parse(res.raw) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('UNAUTHORIZED');
+      // 错误文案不得出现任何白名单 slug —— 否则可被用来逐个探测
+      expect(body.error.message).not.toContain('bigfish');
+      expect(body.error.message).not.toContain('other-app');
+    }
+  });
+
+  it('AI_EMBEDDED_APPS 为空（内置通道关闭）→ 无 Key 一律 401', async () => {
+    const off = await createTestServer({
+      DEEPSEEK_API_KEY: 'sk-test',
+      DEEPSEEK_BASE_URL: `http://127.0.0.1:${up.port}`,
+      AI_USAGE_FLUSH_INTERVAL_MS: '20',
+      AI_EMBEDDED_APPS: '',
+    });
+    try {
+      await createApp(off.request, off.masterKey, 'bigfish', '大肥鱼');
+      const port = (off.app.server.address() as { port: number }).port;
+      const res = await postChat(port, null, chatBody);
+      expect(res.status).toBe(401);
+      expect((JSON.parse(res.raw) as { error: { code: string } }).error.code).toBe('UNAUTHORIZED');
+    } finally {
+      await off.cleanup();
+    }
+  });
+
+  it('无 Key + max_tokens=100000 → 被强制压到 4096（截断而非报错）', async () => {
+    const res = await postChat(serverPort(), null, { ...chatBody, max_tokens: 100000 });
+    expect(res.status).toBe(200);
+    expect(up.lastBody).not.toBeNull();
+    expect(up.lastBody!.max_tokens).toBe(4096);
+  });
+
+  it('带 Key + max_tokens > 32000 → 400（既有行为保持：不透传给上游）', async () => {
+    const res = await postChat(serverPort(), otherKey, { ...chatBody, app: 'other-app', max_tokens: 50000 });
+    expect(res.status).toBe(400);
+    expect((JSON.parse(res.raw) as { error: { code: string } }).error.code).toBe('VALIDATION');
+    expect(up.lastBody?.max_tokens).not.toBe(50000);
+  });
+
+  it('内置通道限流：第 4 次/分钟（上限 3）→ 429 RATE_LIMITED', async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      statuses.push((await postChat(serverPort(), null, chatBody)).status);
+    }
+    expect(statuses.slice(0, 3)).toEqual([200, 200, 200]);
+    expect(statuses[3]).toBe(429);
+  });
+
+  it('日配额用尽 → 429 AI_QUOTA_EXCEEDED + details.resetAt', async () => {
+    const quota = await createTestServer({
+      DEEPSEEK_API_KEY: 'sk-test',
+      DEEPSEEK_BASE_URL: `http://127.0.0.1:${up.port}`,
+      AI_USAGE_FLUSH_INTERVAL_MS: '20',
+      AI_EMBEDDED_APPS: 'bigfish',
+      // 假上游每次恰好 20 token：第一次过（0<20），落库后 used=20 → 第二次被挡
+      AI_EMBEDDED_DAILY_TOKENS: '20',
+    });
+    try {
+      await createApp(quota.request, quota.masterKey, 'bigfish', '大肥鱼');
+      const port = (quota.app.server.address() as { port: number }).port;
+
+      const first = await postChat(port, null, chatBody);
+      expect(first.status).toBe(200);
+
+      await sleep(80); // 等第一次的 20 token 落库
+      const second = await postChat(port, null, chatBody);
+      expect(second.status).toBe(429);
+      const body = JSON.parse(second.raw) as { error: { code: string; details: { limit: number; used: number; resetAt: number } } };
+      expect(body.error.code).toBe('AI_QUOTA_EXCEEDED');
+      expect(body.error.details.limit).toBe(20);
+      expect(body.error.details.used).toBe(20);
+      // resetAt = 北京时间明天零点：在未来一天内，且按天对齐
+      const now = Date.now();
+      expect(body.error.details.resetAt).toBeGreaterThan(now);
+      expect(body.error.details.resetAt).toBeLessThanOrEqual(now + 86_400_000);
+    } finally {
+      await quota.cleanup();
+    }
+  });
+
+  it('无 Key 查用量：?app=bigfish 只回自己的聚合；不带 app → 401；detail=1 → 403', async () => {
+    // bigfish 走 embedded 一次；other-app 走 Key 一次 —— embedded 查询必须看不到 other 的
+    await postChat(serverPort(), null, chatBody);
+    await postChat(serverPort(), otherKey, { ...chatBody, app: 'other-app' });
+    await sleep(80);
+
+    const res = await t.request.get('/v1/ai/usage?app=bigfish&groupBy=app');
+    expect(res.status).toBe(200);
+    expect(res.body.total.requests).toBe(1);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].key).toBe(bigfishAppId);
+
+    const noApp = await t.request.get('/v1/ai/usage');
+    expect(noApp.status).toBe(401);
+
+    const detail = await t.request.get('/v1/ai/usage?app=bigfish&detail=1');
+    expect(detail.status).toBe(403);
+    expect(detail.body.error.code).toBe('FORBIDDEN');
+
+    // 对照：bigfish 的真 Key 查明细不受影响（能看到 embedded 流量）
+    const fishKey = await issueKey(t.request, t.masterKey, { appId: bigfishAppId, name: 'fish-read', scopes: ['ai:read'] });
+    const keyed = await t.request.get('/v1/ai/usage?detail=1').set('X-API-Key', fishKey);
+    expect(keyed.status).toBe(200);
+    expect(keyed.body.requests.some((r: { key_id: string }) => r.key_id === 'embedded')).toBe(true);
   });
 });
