@@ -211,7 +211,7 @@ describe('AI 网关', () => {
 
   const chatBody = {
     app: 'bigfish',
-    model: 'deepseek-chat',
+    model: 'deepseek-flash',
     stream: true,
     messages: [{ role: 'user', content: '你好' }],
   };
@@ -219,11 +219,11 @@ describe('AI 网关', () => {
   it('启动即预置模型目录与单价', async () => {
     const res = await t.request.get('/v1/ai/models').set('X-API-Key', readKey);
     expect(res.status).toBe(200);
-    expect(res.body.items.map((m: { id: string }) => m.id).sort()).toEqual(['deepseek-chat', 'deepseek-reasoner']);
-    const chat = res.body.items.find((m: { id: string }) => m.id === 'deepseek-chat');
-    expect(chat.context).toBe(128000);
-    expect(chat.price_in_cny_per_million).toBe(2);
-    expect(chat.price_out_cny_per_million).toBe(8);
+    expect(res.body.items.map((m: { id: string }) => m.id).sort()).toEqual(['deepseek-flash', 'deepseek-v4-pro']);
+    const chat = res.body.items.find((m: { id: string }) => m.id === 'deepseek-flash');
+    expect(chat.context).toBe(1048576);
+    expect(chat.price_in_cny_per_million).toBe(1);
+    expect(chat.price_out_cny_per_million).toBe(4);
   });
 
   it('流式转发：增量帧 + 补 usage + [DONE]，顺序固定', async () => {
@@ -250,15 +250,15 @@ describe('AI 网关', () => {
     expect(usageFrame.usage.prompt_tokens).toBe(12);
     expect(usageFrame.usage.completion_tokens).toBe(8);
     expect(usageFrame.usage.total_tokens).toBe(20);
-    // 12×2/1e6 + 8×8/1e6 = 0.000088 元
-    expect(usageFrame.usage.cost_cny).toBeCloseTo(0.000088, 9);
+    // 12×1/1e6 + 8×4/1e6 = 0.000044 元（flash：输入 1 / 输出 4）
+    expect(usageFrame.usage.cost_cny).toBeCloseTo(0.000044, 9);
   });
 
   it('请求体原样转给上游（含 stream_options.include_usage）', async () => {
     const port = (t.app.server.address() as { port: number }).port;
     await postChat(port, chatKey, { ...chatBody, temperature: 0.3 });
     expect(up.lastBody).not.toBeNull();
-    expect(up.lastBody!.model).toBe('deepseek-chat');
+    expect(up.lastBody!.model).toBe('deepseek-flash');
     expect(up.lastBody!.stream).toBe(true);
     expect(up.lastBody!.stream_options).toEqual({ include_usage: true });
     expect(up.lastBody!.temperature).toBe(0.3);
@@ -314,7 +314,7 @@ describe('AI 网关', () => {
     expect(res.body.total.total_tokens).toBe(usageFrame.usage.total_tokens);
     expect(res.body.total.cost_cny).toBeCloseTo(usageFrame.usage.cost_cny, 9);
     expect(res.body.requests[0].status).toBe('ok');
-    expect(res.body.requests[0].model).toBe('deepseek-chat');
+    expect(res.body.requests[0].model).toBe('deepseek-flash');
     expect(res.body.requests[0].latency_ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -384,7 +384,7 @@ describe('AI 网关', () => {
       .send({ ...chatBody, model: 'gpt-4o' });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('AI_MODEL_NOT_ALLOWED');
-    expect(res.body.error.details.allowed).toContain('deepseek-chat');
+    expect(res.body.error.details.allowed).toContain('deepseek-flash');
   });
 
   it('上游未配置凭据 → 503 AI_DISABLED（而不是 500）', async () => {
@@ -419,14 +419,14 @@ describe('AI 网关', () => {
   it('用量聚合：groupBy=day / app / model', async () => {
     const port = (t.app.server.address() as { port: number }).port;
     await postChat(port, chatKey, chatBody);
-    await postChat(port, chatKey, { ...chatBody, model: 'deepseek-reasoner' });
+    await postChat(port, chatKey, { ...chatBody, model: 'deepseek-v4-pro' });
     await sleep(200);
 
     const byModel = await t.request.get('/v1/ai/usage?groupBy=model').set('X-API-Key', readKey);
     expect(byModel.status).toBe(200);
     expect(byModel.body.items.map((i: { key: string }) => i.key).sort()).toEqual([
-      'deepseek-chat',
-      'deepseek-reasoner',
+      'deepseek-flash',
+      'deepseek-v4-pro',
     ]);
 
     const byApp = await t.request.get('/v1/ai/usage?groupBy=app').set('X-API-Key', readKey);
@@ -447,7 +447,7 @@ describe('AI 网关', () => {
 
   it('Master Key 调价后，后续请求按新价计费（价格缓存要失效）', async () => {
     const patch = await t.request
-      .patch('/v1/ai/models/deepseek-chat')
+      .patch('/v1/ai/models/deepseek-flash')
       .set('X-Master-Key', t.masterKey)
       .send({ price_out_cny_per_million: 100 });
     expect(patch.status).toBe(200);
@@ -458,13 +458,13 @@ describe('AI 网关', () => {
     const usageFrame = res.frames
       .map((f) => (f === '[DONE]' ? null : JSON.parse(f)))
       .find((f) => f && f.usage);
-    // 12×2/1e6 + 8×100/1e6 = 0.000824
-    expect(usageFrame.usage.cost_cny).toBeCloseTo(0.000824, 9);
+    // 12×1/1e6 + 8×100/1e6 = 0.000812
+    expect(usageFrame.usage.cost_cny).toBeCloseTo(0.000812, 9);
   });
 
   it('普通 Key 不能调价（只有 Master Key 能）', async () => {
     const res = await t.request
-      .patch('/v1/ai/models/deepseek-chat')
+      .patch('/v1/ai/models/deepseek-flash')
       .set('X-API-Key', readKey)
       .send({ price_out_cny_per_million: 1 });
     expect(res.status).toBe(401);

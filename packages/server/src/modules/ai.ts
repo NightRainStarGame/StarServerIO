@@ -30,8 +30,8 @@ import type { ModuleOptions } from '../types.js';
  *    并在服务关闭时强制排空（不排空就等于把最后几条账单丢了）。
  */
 
-/** 模型白名单。与 `ai_model_prices` 的表内容一致，但这里硬编码一份做准入判断。 */
-const ALLOWED_MODELS = ['deepseek-chat', 'deepseek-reasoner'] as const;
+/** 模型白名单（2026-10-12 官方 /models 实测）。与 `ai_model_prices` 表内容一致，这里硬编码做准入判断。 */
+const ALLOWED_MODELS = ['deepseek-flash', 'deepseek-v4-pro'] as const;
 
 /**
  * 首次启动时预置的模型目录与单价（元 / 百万 token）。
@@ -45,8 +45,8 @@ const SEED_MODELS: Array<{
   priceIn: number;
   priceOut: number;
 }> = [
-  { model: 'deepseek-chat', label: 'DeepSeek Chat', context: 128_000, priceIn: 2, priceOut: 8 },
-  { model: 'deepseek-reasoner', label: 'DeepSeek Reasoner', context: 128_000, priceIn: 2, priceOut: 8 },
+  { model: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', context: 1_048_576, priceIn: 1, priceOut: 4 },
+  { model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', context: 1_048_576, priceIn: 3, priceOut: 12 },
 ];
 
 /** 上游 SSE 的单帧（只取用得到的字段）。 */
