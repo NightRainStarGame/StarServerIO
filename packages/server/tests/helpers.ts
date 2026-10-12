@@ -53,8 +53,12 @@ export async function createTestServer(overrides: Record<string, string> = {}): 
     sqlite,
     db,
     config,
-    cleanup: () => {
-      void app.close();
+    // ⚠️ 必须 await app.close() 再关库。
+    // onClose 钩子里可能有「关停时 flush 队列」这类收尾逻辑（如 AI 网关的用量落库），
+    // 而 `void app.close()` 是 fire-and-forget：sqlite.close() 会先跑，
+    // 于是收尾写库撞上已关闭的连接 —— 表现为「用例全绿，但日志里一堆落库失败」。
+    cleanup: async () => {
+      await app.close();
       sqlite.close();
       rmSync(dataDir, { recursive: true, force: true });
     },

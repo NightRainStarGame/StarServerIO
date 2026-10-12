@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 /**
  * SSIO 通用表定义（P1 范围）。
@@ -379,3 +379,60 @@ export const registryVersions = sqliteTable(
     index('idx_registry_versions_pkg').on(t.packageId, t.createdAt),
   ],
 );
+
+/* ══════════════════════════════════════════════════════════════════════
+   AI 网关
+   ────────────────────────────────────────────────────────────────────── */
+
+/**
+ * 单次 AI 请求的用量流水。
+ *
+ * 三点设计：
+ * - `costCny` 存**元**（real），但计算全程走「微元」整数
+ *   （tokens × 单价[元/百万] 恰好就是微元），只在输出时才除以 1e6 ——
+ *   避免浮点在累加时漂移。
+ * - 索引 `(app_id, created_at)` 与 `(model, created_at)` 对应
+ *   `/v1/ai/usage` 的两种 groupBy 主查询路径；`day` 分组走 created_at 范围扫描。
+ * - 客户端中途断开也要落库（status=aborted），否则「花了钱但查不到」的请求
+ *   会随刷新消失，账单永远对不上。
+ */
+export const aiUsage = sqliteTable(
+  'ai_usage',
+  {
+    id: text('id').primaryKey(),
+    appId: text('app_id').notNull(),
+    keyId: text('key_id').notNull(),
+    model: text('model').notNull(),
+    promptTokens: integer('prompt_tokens', { mode: 'number' }).notNull().default(0),
+    completionTokens: integer('completion_tokens', { mode: 'number' }).notNull().default(0),
+    totalTokens: integer('total_tokens', { mode: 'number' }).notNull().default(0),
+    costCny: real('cost_cny').notNull().default(0),
+    latencyMs: integer('latency_ms', { mode: 'number' }).notNull().default(0),
+    status: text('status').$type<'ok' | 'aborted' | 'error'>().notNull(),
+    /** 上游/网关自身的错误码，便于把「失败的花钱请求」也归因出来。 */
+    errorCode: text('error_code'),
+    createdAt: integer('created_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    index('idx_ai_usage_app_created').on(t.appId, t.createdAt),
+    index('idx_ai_usage_model_created').on(t.model, t.createdAt),
+  ],
+);
+
+/**
+ * 模型目录与单价。
+ *
+ * 单价放表里而不是写死：上游调价时改一行即可，不必发版；
+ * 同时它是**成本核算的唯一事实源** —— 用量记录只存算好的金额，不在查询时重算，
+ * 这样改价不会让历史账单跟着变。
+ */
+export const aiModelPrices = sqliteTable('ai_model_prices', {
+  model: text('model').primaryKey(),
+  label: text('label').notNull(),
+  /** 上下文窗口（token）。 */
+  context: integer('context', { mode: 'number' }).notNull(),
+  /** 单价单位：元 / 百万 token。 */
+  priceInCnyPerMillion: real('price_in_cny_per_million').notNull(),
+  priceOutCnyPerMillion: real('price_out_cny_per_million').notNull(),
+  updatedAt: integer('updated_at', { mode: 'number' }).notNull(),
+});

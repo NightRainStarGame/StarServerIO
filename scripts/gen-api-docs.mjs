@@ -35,6 +35,7 @@ const MODULE_LABELS = {
   releases: '发行',
   cards: '卡密',
   announcements: '公告',
+  ai: 'AI 网关（DeepSeek 代理 / 用量）',
 };
 
 /**

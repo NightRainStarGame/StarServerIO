@@ -22,6 +22,13 @@
       "when": 1790850119005,
       "tag": "0002_organic_vulture",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791795787259,
+      "tag": "0003_flimsy_the_captain",
+      "breakpoints": true
     }
   ]
 }

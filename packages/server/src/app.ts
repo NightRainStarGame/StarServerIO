@@ -19,6 +19,7 @@ import { registerAnnouncements } from './modules/announcements.js';
 import { registerForum } from './modules/forum.js';
 import { registerRegistry } from './modules/registry.js';
 import { registerKv } from './modules/kv.js';
+import { registerAi } from './modules/ai.js';
 import { LocalDriver } from './storage/local.js';
 import { StorageService } from './storage/service.js';
 import type { StorageDriver } from './storage/driver.js';
@@ -85,6 +86,8 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
     await registerRegistry(instance, moduleOpts);
     // P10：KV（TaskManager 的班级 / 作业同步用它做多端结构化数据共享）
     await registerKv(instance, moduleOpts);
+    // AI 网关：DeepSeek 代理 + 用量记账。上游 key 只在服务端，客户端拿 ai:chat 的 APIKey
+    await registerAi(instance, moduleOpts);
   });
 
   if (opts.janitorIntervalMs !== undefined) {

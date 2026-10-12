@@ -357,3 +357,103 @@ export interface PatchAnnouncementRequest {
   startAt?: number;
   endAt?: number | null;
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   AI 网关（DeepSeek 代理 + 用量统计）
+   ──────────────────────────────────────────────────────────────────────
+   契约要点（客户端已按此实现，**不可单方面改动**）：
+
+   1. `POST /v1/ai/chat/completions` 返回 OpenAI 兼容的 SSE 增量格式，
+      且**结束前必须补发一条带 `usage` 的事件** —— 客户端把 `usage`
+      当作「流结束」信号。没收到 usage 的流会被它当成中断。
+   2. usage 事件固定形状为 `{ choices: [], usage: {...} }`（choices 为空数组）。
+   3. 成本字段 `cost_cny` 单位是**元**，保留 6 位小数量级的精度（微元级）。
+   ══════════════════════════════════════════════════════════════════════ */
+
+/** 流式请求体（只暴露契约里约定的字段，其余按 OpenAI 兼容透传由服务端裁剪）。 */
+export interface AiChatRequest {
+  /** 逻辑应用名；用于日志与用量归因，真正鉴权走 APIKey。 */
+  app?: string;
+  model: string;
+  messages: Array<{ role: string; content: string }>;
+  /** false 时服务端仍以流式返回（保持单一代码路径，避免客户端两套解析）。 */
+  stream?: boolean;
+  temperature?: number;
+  max_tokens?: number;
+}
+
+/** 结束前补发的那条 usage 事件里的用量字段。 */
+export interface AiUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_cny: number;
+}
+
+/** 流式响应中携带 usage 的那一帧（choices 恒为空数组）。 */
+export interface AiChatUsageFrame {
+  choices: [];
+  usage: AiUsage;
+}
+
+export type AiUsageGroupBy = 'day' | 'app' | 'model';
+
+export interface AiUsageAggregate {
+  key: string;
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_cny: number;
+}
+
+export interface AiUsageTotals {
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_cny: number;
+}
+
+export type AiUsageStatus = 'ok' | 'aborted' | 'error';
+
+/** `detail=1` 时返回的单条请求明细（最近 50 条）。 */
+export interface AiUsageRequestRecord {
+  id: string;
+  app: string;
+  key_id: string;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_cny: number;
+  latency_ms: number;
+  status: AiUsageStatus;
+  error_code: string | null;
+  created_at: number;
+}
+
+export interface AiUsageResponse {
+  total: AiUsageTotals;
+  items: AiUsageAggregate[];
+  /** 仅在 detail=1 时出现。 */
+  requests?: AiUsageRequestRecord[];
+}
+
+export interface AiModelRecord {
+  id: string;
+  label: string;
+  context: number;
+  price_in_cny_per_million: number;
+  price_out_cny_per_million: number;
+}
+
+export interface AiModelsResponse {
+  items: AiModelRecord[];
+}
+
+/** 管理员调整单价的请求体。 */
+export interface PatchAiModelPriceRequest {
+  price_in_cny_per_million?: number;
+  price_out_cny_per_million?: number;
+}

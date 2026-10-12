@@ -23,6 +23,11 @@ export const SCOPES = [
   'announcements:read',
   'announcements:write',
   'announcements:delete',
+  // AI 网关：chat 会「花上游的钱」，read 只是看账单。
+  // 两者刻意分开 —— 客户端只需要能对话（ai:chat），
+  // 不该顺带能读走全平台的用量与账单（ai:read）。
+  'ai:chat',
+  'ai:read',
   'admin:*',
 ] as const;
 
