@@ -186,3 +186,58 @@ code {
   padding: 2px 6px;
   border-radius: 4px;
 }
+
+/* ─────────────────────── AI 用量页 ─────────────────────── */
+
+/* 顶栏的视图切换：和 .tabs 区分开 —— 那个是页面内的 tab，这个是全局导航 */
+.topnav {
+  display: flex;
+  gap: 4px;
+}
+.topnav button {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.topnav button.active {
+  background: var(--accent);
+  color: #08101f;
+  font-weight: 600;
+}
+
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 12px 0 4px;
+}
+.stat-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  line-height: 1.6;
+}
+.stat-main {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 2px 0 4px;
+}
+
+/* 图表：手写 SVG，宽度自适应但保持比例 —— 30 根柱子拉变形会很难看 */
+.chart-wrap {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px 6px;
+}
+.chart-wrap svg {
+  width: 100%;
+  height: 150px;
+  display: block;
+}
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 2px 2px 4px;
+}

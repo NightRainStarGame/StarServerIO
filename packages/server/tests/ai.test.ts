@@ -329,6 +329,48 @@ describe('AI 网关', () => {
     expect(res.body.error.details.granted).toEqual(['release:read']);
   });
 
+  it('契约要求：Authorization: Bearer <APIKey> 也要认（客户端就是这么调的）', async () => {
+    const port = (t.app.server.address() as { port: number }).port;
+    const res = await new Promise<{ status: number; raw: string }>((resolve, reject) => {
+      const req = httpRequest(
+        {
+          host: '127.0.0.1',
+          port,
+          path: '/v1/ai/chat/completions',
+          method: 'POST',
+          // 刻意**不带** x-api-key，只带 Authorization —— 与契约一致
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${chatKey}` },
+        },
+        (r) => {
+          let buf = '';
+          r.setEncoding('utf8');
+          r.on('data', (c: string) => (buf += c));
+          r.on('end', () => resolve({ status: r.statusCode ?? 0, raw: buf }));
+          r.on('error', reject);
+        },
+      );
+      req.on('error', reject);
+      req.end(JSON.stringify(chatBody));
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.raw).toContain('[DONE]');
+    expect(res.raw).toContain('"usage"');
+
+    // 用量接口同样认这个头（控制台/运维脚本会用它）
+    const usage = await t.request.get('/v1/ai/usage').set('Authorization', `Bearer ${readKey}`);
+    expect(usage.status).toBe(200);
+  });
+
+  it('Authorization 里放用户 JWT 不会绕过 APIKey 鉴权（AI 路由只认 APIKey）', async () => {
+    const res = await t.request
+      .post('/v1/ai/chat/completions')
+      .set('Authorization', 'Bearer not-an-api-key')
+      .send(chatBody);
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+  });
+
   it('不带 ai:read 的 Key 查用量 → 403', async () => {
     const res = await t.request.get('/v1/ai/usage').set('X-API-Key', chatKey);
     expect(res.status).toBe(403);

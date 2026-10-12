@@ -168,6 +168,29 @@ export function resetAiRateLimitBuckets(): void {
   aiBuckets.clear();
 }
 
+/**
+ * 兼容 `Authorization: Bearer <APIKey>`。
+ *
+ * 为什么需要：**客户端契约（大肥鱼）用的是 Authorization 头**，
+ * 而 SSIO 全站 APIKey 走的是 `X-API-Key`（见 plugins/auth.ts）。
+ * 与其让客户端改一行、还要发版，不如在网关这里做一次「头部搬运」——两个都认。
+ *
+ * 为什么只放在 AI 路由上、不改全局：全局的 `Authorization` 还背着**用户 JWT** 的语义
+ * （requireUser 读的就是它）。全局放开会让两种凭据混在同一个头上，
+ * 将来排查「这请求到底以谁的身份进来」会变得很难。
+ *
+ * ⚠️ 必须是 **async** 的。写成同步函数时 Fastify 会按「回调式钩子」处理 ——
+ * 它等一个永远不会来的 `done()`，于是请求挂死（不报错，就是不返回）。
+ * 这个坑是被测试抓出来的：所有挂了本钩子的路由集体 5s 超时，
+ * 唯独没挂它的 PATCH /v1/ai/models/:model 正常。
+ */
+async function acceptBearerApiKey(req: FastifyRequest): Promise<void> {
+  const auth = req.headers.authorization;
+  if (!req.headers['x-api-key'] && typeof auth === 'string' && auth.startsWith('Bearer ')) {
+    req.headers['x-api-key'] = auth.slice(7).trim();
+  }
+}
+
 /* ────────────────────────── 工具 ────────────────────────── */
 
 /**
@@ -277,6 +300,7 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
     '/v1/ai/chat/completions',
     {
       preHandler: [
+        acceptBearerApiKey,
         app.requireApiKey({ scopes: ['ai:chat'] }),
         async (req: FastifyRequest) => {
           const hits = hitAiLimit(req.ctx.appId!, config.AI_RATE_LIMIT_MAX, config.AI_RATE_LIMIT_WINDOW_MS);
@@ -504,7 +528,7 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
      ════════════════════════════════════════════════════════════════ */
   app.get(
     '/v1/ai/usage',
-    { preHandler: [app.requireApiKey({ scopes: ['ai:read'] })], schema: { querystring: UsageQuery } },
+    { preHandler: [acceptBearerApiKey, app.requireApiKey({ scopes: ['ai:read'] })], schema: { querystring: UsageQuery } },
     async (req: FastifyRequest) => {
       const q = req.query as {
         app?: string;
@@ -520,17 +544,25 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
       if (q.from && Number.isNaN(from)) throw new AppError('VALIDATION', `from 不是合法的 ISO 时间：${q.from}`);
       if (q.to && Number.isNaN(to)) throw new AppError('VALIDATION', `to 不是合法的 ISO 时间：${q.to}`);
 
-      // `app` 传 slug 或 id 都认：调用方往往只知道 slug（「bigfish」）
-      const conditions = [];
+      // 多租户红线：用量**永远**按调用方 Key 所属的 app 过滤。
+      // 不这么做，任何一把带 ai:read 的 Key 都能读到全平台账单 ——
+      // 而「按 app 分账」正是这个模块存在的意义。
+      const callerAppId = req.ctx.appId!;
+      const conditions = [eq(aiUsage.appId, callerAppId)];
       if (Number.isFinite(from)) conditions.push(gte(aiUsage.createdAt, from));
       if (Number.isFinite(to)) conditions.push(lte(aiUsage.createdAt, to));
 
       if (q.app) {
+        // `app` 传 slug 或 id 都认（调用方往往只知道 slug），但必须解析到**自己**的 app，
+        // 否则就是拿自己的 Key 查别人家的账。
         const bySlug = db.select({ id: apps.id }).from(apps).where(eq(apps.slug, q.app)).get();
-        conditions.push(eq(aiUsage.appId, bySlug?.id ?? q.app)); // 不是 slug 就当它已经是 id
+        const resolved = bySlug?.id ?? q.app;
+        if (resolved !== callerAppId) {
+          throw new AppError('FORBIDDEN', '只能查询本 Key 所属应用的用量');
+        }
       }
 
-      const where = conditions.length ? and(...conditions) : undefined;
+      const where = and(...conditions);
 
       // 分组表达式：day 用本地时区还是 UTC？统一用 UTC+8 之外的中性做法 ——
       // 这里按 UTC 计算并在返回时保持原样，避免跨时区服务器把「今天」算错一天。
@@ -613,7 +645,7 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
      ════════════════════════════════════════════════════════════════ */
   app.get(
     '/v1/ai/models',
-    { preHandler: [app.requireApiKey({ scopes: ['ai:read'] })] },
+    { preHandler: [acceptBearerApiKey, app.requireApiKey({ scopes: ['ai:read'] })] },
     async () => {
       const rows = db.select().from(aiModelPrices).where(inArray(aiModelPrices.model, [...ALLOWED_MODELS])).all();
       return {

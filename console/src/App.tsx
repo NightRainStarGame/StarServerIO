@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { masterApi, type AppRecord } from './api.js';
 import { AppDetail } from './views/AppDetail.js';
 import { AppList } from './views/AppList.js';
+import { AiUsage } from './views/AiUsage.js';
 import { clearSession, loadSession, maskSecret, saveSession, type Session } from './session.js';
 
 export function App(): JSX.Element {
@@ -9,6 +10,7 @@ export function App(): JSX.Element {
   const [baseUrl, setBaseUrl] = useState(session?.baseUrl ?? 'http://127.0.0.1:8100');
   const [masterKey, setMasterKey] = useState('');
   const [selected, setSelected] = useState<AppRecord | null>(null);
+  const [showAi, setShowAi] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const login = async (): Promise<void> => {
@@ -28,6 +30,7 @@ export function App(): JSX.Element {
     clearSession();
     setSession(null);
     setSelected(null);
+    setShowAi(false);
     setMasterKey('');
   };
 
@@ -65,10 +68,36 @@ export function App(): JSX.Element {
         <span className="brand">SSIO</span>
         <span className="muted">{session.baseUrl}</span>
         <span className="spacer" />
+        <nav className="topnav">
+          <button
+            className={!showAi && !selected ? 'active' : ''}
+            onClick={() => {
+              setShowAi(false);
+              setSelected(null);
+            }}
+          >
+            应用
+          </button>
+          <button
+            className={showAi ? 'active' : ''}
+            onClick={() => {
+              setShowAi(true);
+              setSelected(null);
+            }}
+          >
+            AI 用量
+          </button>
+        </nav>
         <span className="muted">Master {maskSecret(session.masterKey)}</span>
         <button onClick={logout}>退出</button>
       </header>
-      {selected ? (
+      {showAi ? (
+        <AiUsage
+          session={session}
+          onBack={() => setShowAi(false)}
+          onSessionChange={updateSession}
+        />
+      ) : selected ? (
         <AppDetail
           session={session}
           app={selected}

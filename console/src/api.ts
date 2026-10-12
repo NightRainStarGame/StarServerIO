@@ -109,6 +109,26 @@ export function appApi(baseUrl: string, apiKey: string) {
       remove: (id: string) => call<{ deleted: true }>('DELETE', `/v1/announcements/${id}`),
     },
     quota: () => call<{ usedBytes: number; quotaBytes: number }>('GET', '/v1/storage/quota'),
+    ai: {
+      /**
+       * 用量查询。注意 `/v1/ai/usage` 是 **APIKey 面**（要 ai:read），
+       * 而 APIKey 天然带 app 归属 —— 服务端会强制按这把 Key 的 app 过滤。
+       * 所以「看全量」必须**逐应用各查一次再在前端合并**：
+       * Master Key 根本不被这个端点接受（requireApiKey 只认 X-API-Key）。
+       */
+      usage: (q: { app?: string; from?: string; to?: string; groupBy?: 'day' | 'app' | 'model'; detail?: '1' }) => {
+        // 显式只放有值的参数：request 层直接 URLSearchParams 序列化，
+        // 带进去一个 undefined 会变成字面量 "undefined" 发出去。
+        const query: Record<string, string> = {};
+        if (q.app) query.app = q.app;
+        if (q.from) query.from = q.from;
+        if (q.to) query.to = q.to;
+        if (q.groupBy) query.groupBy = q.groupBy;
+        if (q.detail) query.detail = q.detail;
+        return call<AiUsageResponse>('GET', '/v1/ai/usage', undefined, query);
+      },
+      models: () => call<{ items: AiModelRecord[] }>('GET', '/v1/ai/models'),
+    },
   };
 }
 
@@ -129,9 +149,13 @@ export function masterApi(baseUrl: string, masterKey: string) {
         call<{ id: string; key: string }>('POST', '/v1/keys', body),
       revoke: (id: string) => call<{ revoked: true }>('DELETE', `/v1/keys/${id}`),
     },
+    ai: {
+      /** 改单价（Master Key 专属）。单价是账单口径的唯一事实源，改完立即对新请求生效。 */
+      setPrice: (model: string, body: { price_in_cny_per_million?: number; price_out_cny_per_million?: number }) =>
+        call<AiModelRecord>('PATCH', `/v1/ai/models/${encodeURIComponent(model)}`, body),
+    },
     cards: {
-      list: () => call<CardBatchRecord[]>('GET', '/v1/cards/batches'),
-      /**
+      list: () => call<CardBatchRecord[]>('GET', '/v1/cards/batches'),      /**
        * 返回的 `exportUrl` 是**带签名**的一次性链接（?exp=&sig=），可以给用户直接点。
        * 不要自己拼 `/v1/cards/batches/:id/export` —— 那个端点不带签名走管理员凭据，
        * 浏览器裸点会 401。
@@ -153,6 +177,10 @@ export const SCOPE_PRESETS: Array<{ label: string; scopes: string[] }> = [
   { label: '发版（可写，不可删）', scopes: ['release:read', 'release:write', 'storage:read', 'storage:write'] },
   { label: '发版 + 下架', scopes: ['release:read', 'release:write', 'release:delete', 'storage:read', 'storage:write'] },
   { label: '卡密核销', scopes: ['cards:redeem'] },
+  // 客户端只需要能对话（会花上游的钱），不需要看账单；
+  // 看账单是运营侧的事，单列一条只读预设。
+  { label: 'AI 对话（客户端用，如大肥鱼）', scopes: ['ai:chat'] },
+  { label: 'AI 用量只读（看账单）', scopes: ['ai:read'] },
   {
     label: '控制台全量（含删除）',
     scopes: [
@@ -172,6 +200,9 @@ export const SCOPE_PRESETS: Array<{ label: string; scopes: string[] }> = [
       'announcements:read',
       'announcements:write',
       'announcements:delete',
+      // 控制台的「AI 用量」页要读账单，会话 Key 必须带 ai:read。
+      // 刻意**不给** ai:chat —— 控制台自己不发起对话，那会花上游的钱。
+      'ai:read',
       // 必须是 `admin:*`：SCOPES 里没有 admin:read / admin:write 这两个值，
       // 写错会让签发直接报「未知 scope」
       'admin:*',
@@ -186,3 +217,47 @@ export const SCOPE_PRESETS: Array<{ label: string; scopes: string[] }> = [
 export const CONSOLE_SESSION_SCOPES: string[] =
   SCOPE_PRESETS.find((p) => p.label.startsWith('控制台全量'))?.scopes ??
   SCOPE_PRESETS[SCOPE_PRESETS.length - 1]!.scopes;
+
+/* ─────────────────────── AI 用量（DeepSeek 网关） ─────────────────────── */
+
+export interface AiUsageTotals {
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_cny: number;
+}
+
+/** 聚合行：`key` 的含义随 groupBy 变（日期 / appId / 模型名）。 */
+export interface AiUsageAggregate extends AiUsageTotals {
+  key: string;
+}
+
+export interface AiUsageRequestRecord {
+  id: string;
+  app: string;
+  key_id: string;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_cny: number;
+  latency_ms: number;
+  status: 'ok' | 'aborted' | 'error';
+  error_code: string | null;
+  created_at: number;
+}
+
+export interface AiUsageResponse {
+  total: AiUsageTotals;
+  items: AiUsageAggregate[];
+  requests?: AiUsageRequestRecord[];
+}
+
+export interface AiModelRecord {
+  id: string;
+  label: string;
+  context: number;
+  price_in_cny_per_million: number;
+  price_out_cny_per_million: number;
+}
