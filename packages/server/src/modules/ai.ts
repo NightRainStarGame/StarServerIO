@@ -476,7 +476,14 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
       // 上游请求体：只透传白名单字段，避免客户端塞进 temperature 之外的怪东西
       const upstreamBody = {
         model: body.model,
-        messages: body.messages,
+        /**
+         * AJV 的 coerceTypes 会把 content: null 矫正成 ""（Union 里 string 分支在前），
+         * 而 DeepSeek 的 assistant 工具消息要求 content 为 null 或数组块——
+         * 收到 "" 会 422。这里在发往上游前把空串还原为 null。
+         */
+        messages: body.messages.map((m) =>
+          m.content === '' ? { ...m, content: null } : m,
+        ),
         temperature: body.temperature,
         max_tokens: body.max_tokens,
         // function calling：工具清单与选择策略原样透传
