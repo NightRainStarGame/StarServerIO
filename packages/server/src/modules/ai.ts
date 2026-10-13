@@ -504,6 +504,18 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
         stream_options: { include_usage: true },
       };
 
+      // TODO(ai-debug): 临时排查 —— 上游 422 时打印实际发出的 messages 形态，定位后删除
+      console.log('[ai:debug] upstream messages:', JSON.stringify(
+        (upstreamBody.messages as Array<Record<string, unknown>>).map((m) => ({
+          role: m.role,
+          contentType: m.content === null ? 'null' : Array.isArray(m.content) ? 'array' : typeof m.content,
+          contentSample: typeof m.content === 'string' ? m.content.slice(0, 12) : String(m.content).slice(0, 12),
+          hasToolCalls: Array.isArray(m.tool_calls),
+          hasToolCallId: typeof m.tool_call_id,
+          hasReasoning: typeof m.reasoning_content,
+        })),
+      ));
+
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), config.AI_UPSTREAM_TIMEOUT_MS);
 
