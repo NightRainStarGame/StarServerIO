@@ -487,12 +487,14 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
       const upstreamBody = {
         model: body.model,
         /**
-         * AJV 的 coerceTypes 会把 content: null 矫正成 ""（Union 里 string 分支在前），
-         * 而 DeepSeek 的 assistant 工具消息要求 content 为 null 或数组块——
-         * 收到 "" 会 422。这里在发往上游前把空串还原为 null。
+         * AJV 的 coerceTypes（'array' 模式）会把 content: null 矫正成空串或空数组
+         * （取决于 Union 分支匹配顺序），而 DeepSeek 的 assistant 工具消息要求
+         * content 为 null —— 收到 ""/[] 会 422。这里统一还原。
          */
         messages: body.messages.map((m) =>
-          m.content === '' ? { ...m, content: null } : m,
+          m.content == null || m.content === '' || (Array.isArray(m.content) && m.content.length === 0)
+            ? { ...m, content: null }
+            : m,
         ),
         temperature: body.temperature,
         max_tokens: body.max_tokens,
@@ -503,18 +505,6 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
         // 关键：没有它 DeepSeek 不会在流末尾附 usage，我们就只能全靠估算
         stream_options: { include_usage: true },
       };
-
-      // TODO(ai-debug): 临时排查 —— 上游 422 时打印实际发出的 messages 形态，定位后删除
-      console.log('[ai:debug] upstream messages:', JSON.stringify(
-        (upstreamBody.messages as Array<Record<string, unknown>>).map((m) => ({
-          role: m.role,
-          contentType: m.content === null ? 'null' : Array.isArray(m.content) ? 'array' : typeof m.content,
-          contentSample: typeof m.content === 'string' ? m.content.slice(0, 12) : String(m.content).slice(0, 12),
-          hasToolCalls: Array.isArray(m.tool_calls),
-          hasToolCallId: typeof m.tool_call_id,
-          hasReasoning: typeof m.reasoning_content,
-        })),
-      ));
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), config.AI_UPSTREAM_TIMEOUT_MS);
