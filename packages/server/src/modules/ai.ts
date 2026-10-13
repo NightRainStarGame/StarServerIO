@@ -269,6 +269,7 @@ const ChatBody = Type.Object({
       content: Type.Union([
         Type.String({ minLength: 1, maxLength: 100_000 }),
         Type.Array(Type.Any()),
+        Type.Null(),
       ]),
     }),
     { minItems: 1, maxItems: 200 },

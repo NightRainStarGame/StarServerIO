@@ -379,7 +379,7 @@ export interface AiChatRequest {
    * content 支持两种形态：纯文本，或 OpenAI 多模态数组（V4.1 Flash 图片输入、
    * function calling 的 tool 消息回传）。服务端 schema 已放行。
    */
-  messages: Array<{ role: string; content: string | unknown[] }>;
+  messages: Array<{ role: string; content: string | unknown[] | null }>;
   /** false 时服务端仍以流式返回（保持单一代码路径，避免客户端两套解析）。 */
   stream?: boolean;
   temperature?: number;
