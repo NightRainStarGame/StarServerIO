@@ -506,6 +506,9 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
         stream_options: { include_usage: true },
       };
 
+      // TODO(ai-debug): 临时排查 —— 打印发往上游的原始 body 前 900 字符，定位后删除
+      console.log('[ai:debug] upstream body:', JSON.stringify(upstreamBody).slice(0, 900));
+
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), config.AI_UPSTREAM_TIMEOUT_MS);
 
