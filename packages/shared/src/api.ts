@@ -375,11 +375,18 @@ export interface AiChatRequest {
   /** 逻辑应用名；用于日志与用量归因，真正鉴权走 APIKey。 */
   app?: string;
   model: string;
-  messages: Array<{ role: string; content: string }>;
+  /**
+   * content 支持两种形态：纯文本，或 OpenAI 多模态数组（V4.1 Flash 图片输入、
+   * function calling 的 tool 消息回传）。服务端 schema 已放行。
+   */
+  messages: Array<{ role: string; content: string | unknown[] }>;
   /** false 时服务端仍以流式返回（保持单一代码路径，避免客户端两套解析）。 */
   stream?: boolean;
   temperature?: number;
   max_tokens?: number;
+  /** function calling：工具清单与选择策略，原样透传上游 */
+  tools?: unknown[];
+  tool_choice?: unknown;
 }
 
 /** 结束前补发的那条 usage 事件里的用量字段。 */

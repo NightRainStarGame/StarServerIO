@@ -257,11 +257,27 @@ const ChatBody = Type.Object({
   app: Type.Optional(Type.String({ maxLength: 64 })),
   model: Type.String({ minLength: 1, maxLength: 64 }),
   messages: Type.Array(
-    Type.Object({ role: Type.String({ minLength: 1, maxLength: 32 }), content: Type.String({ minLength: 1, maxLength: 100_000 }) }),
+    Type.Object({
+      role: Type.String({ minLength: 1, maxLength: 32 }),
+      /**
+       * content 允许两种形态：
+       * - 纯文本（绝大多数请求）
+       * - OpenAI 多模态数组（V4.1 Flash 的图片输入：[{type:'text'},{type:'image_url'}]），
+       *   以及 function calling 第二轮 tool 消息的回传。数组形态不设长度上限 ——
+       *   base64 图片会撑爆任何合理的字符数限制，真正的体量控制靠 bodyLimit。
+       */
+      content: Type.Union([
+        Type.String({ minLength: 1, maxLength: 100_000 }),
+        Type.Array(Type.Any()),
+      ]),
+    }),
     { minItems: 1, maxItems: 200 },
   ),
   stream: Type.Optional(Type.Boolean()),
   temperature: Type.Optional(Type.Number({ minimum: 0, maximum: 2 })),
+  /** function calling 工具清单与选择策略，原样透传上游（客户端自担工具语义） */
+  tools: Type.Optional(Type.Array(Type.Any())),
+  tool_choice: Type.Optional(Type.Any()),
   /**
    * 上限放宽到 1_000_000 是**故意的**：schema 校验跑在 preHandler（embedded 判定）之前，
    * 若在这里卡 32_000，内置通道的 max_tokens=100000 会在进 handler 前就被 400 掉，
@@ -429,6 +445,8 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
         },
       ],
       schema: { body: ChatBody },
+      // 多模态：base64 图片会超过 Fastify 默认 1MiB（客户端已压缩，双保险）
+      bodyLimit: 12 * 1024 * 1024,
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as AiChatRequest;
@@ -460,6 +478,9 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
         messages: body.messages,
         temperature: body.temperature,
         max_tokens: body.max_tokens,
+        // function calling：工具清单与选择策略原样透传
+        tools: body.tools,
+        tool_choice: body.tool_choice,
         stream: true,
         // 关键：没有它 DeepSeek 不会在流末尾附 usage，我们就只能全靠估算
         stream_options: { include_usage: true },
