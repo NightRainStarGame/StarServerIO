@@ -165,7 +165,12 @@ export function masterApi(baseUrl: string, masterKey: string) {
     },
     keys: {
       list: () => call<ApiKeyRecord[]>('GET', '/v1/keys'),
-      issue: (body: { appId: string; name: string; scopes: string[] }) =>
+      /**
+       * `revokeExisting`：签发即吊销同 app 同名的在用 Key。会话 Key（console-session）
+       * 必须传 true —— 否则每换一次浏览器/清一次缓存就多一把永远用不上的死凭证；
+       * 人工命名的 Key 不传（同名的多把可能是有意为之）。
+       */
+      issue: (body: { appId: string; name: string; scopes: string[]; revokeExisting?: boolean }) =>
         call<{ id: string; key: string }>('POST', '/v1/keys', body),
       revoke: (id: string) => call<{ revoked: true }>('DELETE', `/v1/keys/${id}`),
     },

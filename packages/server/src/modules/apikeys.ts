@@ -1,5 +1,5 @@
 import { Type } from '@sinclair/typebox';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { AppError, validateScopes, type ApiKeyIssued } from '@ssio/shared';
 import { apiKeys, apps } from '../db/schema.js';
@@ -30,6 +30,13 @@ const CreateKeyBody = Type.Object({
   name: Type.String({ minLength: 1, maxLength: 64 }),
   scopes: Type.Array(Type.String(), { minItems: 1 }),
   expiresAt: Type.Optional(NullableInteger()),
+  /**
+   * 签发时自动吊销「同 app 同名」的全部在用 Key（默认关闭，不改变既有语义）。
+   * 适用场景：自动续签类客户端（控制台会话 Key、站点面板 Key）——它们每次
+   * 签新 Key 时旧 Key 就地失效，不再积累「明文已丢、状态却显示在用」的死凭证。
+   * 不做默认行为：人工场景里同名的多把 Key 可能是有意为之。
+   */
+  revokeExisting: Type.Optional(Type.Boolean()),
 });
 
 const UpdateKeyBody = Type.Object({
@@ -70,6 +77,7 @@ export async function registerApiKeys(app: FastifyInstance, opts: ModuleOptions)
         name: string;
         scopes: string[];
         expiresAt?: number | null;
+        revokeExisting?: boolean;
       };
 
       const target = body.appId
@@ -81,6 +89,27 @@ export async function registerApiKeys(app: FastifyInstance, opts: ModuleOptions)
 
       const unknown = validateScopes(body.scopes);
       if (unknown.length > 0) throw new AppError('VALIDATION', '存在未知 scope', { unknown });
+
+      // opt-in：签发即接管 —— 同名在用 Key 先全部吊销，一次往返完成「换钥」
+      if (body.revokeExisting) {
+        const stale = db
+          .select()
+          .from(apiKeys)
+          .where(and(eq(apiKeys.appId, target.id), eq(apiKeys.name, body.name), isNull(apiKeys.revokedAt)))
+          .all();
+        const now = Date.now();
+        for (const k of stale) {
+          db.update(apiKeys).set({ revokedAt: now }).where(eq(apiKeys.id, k.id)).run();
+          writeAudit(db, {
+            appId: target.id,
+            actorType: 'master',
+            action: 'key.revoke',
+            target: k.id,
+            ip: req.ip,
+            meta: { reason: 'revoke-existing', name: k.name },
+          });
+        }
+      }
 
       const { key, keyPrefix } = generateApiKey();
       const row = {

@@ -105,6 +105,8 @@ export function AiUsage({
           appId: app.id,
           name: 'console-session',
           scopes: CONSOLE_SESSION_SCOPES,
+          // 换钥即接管：其他浏览器的同名会话 Key 就地失效（那边会自动重签）
+          revokeExisting: true,
         });
         nextSession.sessionKeys[app.id] = { id: res.id, key: res.key };
         keys[app.id] = res.key;
@@ -164,6 +166,7 @@ export function AiUsage({
                   appId: app.id,
                   name: 'console-session',
                   scopes: CONSOLE_SESSION_SCOPES,
+                  revokeExisting: true,
                 });
                 reissued[app.id] = { id: fresh.id, key: fresh.key };
                 return { app, ...(await queryUsage(fresh.key)) };

@@ -107,4 +107,58 @@ describe('APIKey 鉴权', () => {
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION');
   });
+
+  it('⑨ revokeExisting：换钥即接管 —— 同名在用 Key 被吊销，其他名字不动', async () => {
+    const app = await createApp(t.request, t.masterKey, 'demo');
+    // 两把同名 + 一把不同名
+    await issueKey(t.request, t.masterKey, { appId: app.id, name: 'console-session', scopes: ['auth:read'] });
+    await issueKey(t.request, t.masterKey, { appId: app.id, name: 'console-session', scopes: ['auth:read'] });
+    const otherKey = await issueKey(t.request, t.masterKey, { appId: app.id, name: 'real-client', scopes: ['auth:read'] });
+
+    const res = await t.request
+      .post('/v1/keys')
+      .set('X-Master-Key', t.masterKey)
+      .send({ appId: app.id, name: 'console-session', scopes: ['auth:read'], revokeExisting: true });
+    expect(res.status).toBe(201);
+
+    const listed = (await t.request.get('/v1/keys').set('X-Master-Key', t.masterKey)).body as Array<
+      { name: string; revokedAt: number | null }
+    >;
+    const sessions = listed.filter((k) => k.name === 'console-session');
+    expect(sessions).toHaveLength(3);
+    // 新 Key 在用，两把旧的都被吊销
+    expect(sessions.filter((k) => k.revokedAt === null)).toHaveLength(1);
+    // 不同名的 Key 不受影响
+    const other = listed.find((k) => k.name === 'real-client');
+    expect(other?.revokedAt).toBeNull();
+
+    // 其他 app 的同名 Key 也不受影响（隔离维度是 appId+name）
+    const app2 = await createApp(t.request, t.masterKey, 'other');
+    await issueKey(t.request, t.masterKey, { appId: app2.id, name: 'console-session', scopes: ['auth:read'] });
+    const res2 = await t.request
+      .post('/v1/keys')
+      .set('X-Master-Key', t.masterKey)
+      .send({ appId: app.id, name: 'console-session', scopes: ['auth:read'], revokeExisting: true });
+    expect(res2.status).toBe(201);
+    const listed2 = (await t.request.get(`/v1/keys?appId=${app2.id}`).set('X-Master-Key', t.masterKey)).body as Array<
+      { name: string; revokedAt: number | null }
+    >;
+    expect(listed2.find((k) => k.name === 'console-session')?.revokedAt).toBeNull();
+
+    void otherKey;
+  });
+
+  it('⑩ 不带 revokeExisting 时同名多 Key 并存（默认语义不变）', async () => {
+    const app = await createApp(t.request, t.masterKey, 'demo');
+    await issueKey(t.request, t.masterKey, { appId: app.id, name: 'pair', scopes: ['auth:read'] });
+    const res = await t.request
+      .post('/v1/keys')
+      .set('X-Master-Key', t.masterKey)
+      .send({ appId: app.id, name: 'pair', scopes: ['auth:read'] });
+    expect(res.status).toBe(201);
+    const listed = (await t.request.get('/v1/keys').set('X-Master-Key', t.masterKey)).body as Array<
+      { name: string; revokedAt: number | null }
+    >;
+    expect(listed.filter((k) => k.name === 'pair' && k.revokedAt === null)).toHaveLength(2);
+  });
 });

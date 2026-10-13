@@ -33,6 +33,8 @@ export function AppDetail({
       appId: app.id,
       name: 'console-session',
       scopes: CONSOLE_SESSION_SCOPES,
+      // 换钥即接管：旧浏览器的会话 Key 就地失效（那边下次打开会自动重签）
+      revokeExisting: true,
     });
     onSessionChange({
       ...session,
