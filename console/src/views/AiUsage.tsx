@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ApiError,
   appApi,
   masterApi,
   CONSOLE_SESSION_SCOPES,
@@ -9,7 +10,7 @@ import {
   type AiUsageTotals,
   type AppRecord,
 } from '../api.js';
-import { fmtTime, type Session } from '../session.js';
+import { appTitle, fmtTime, type Session } from '../session.js';
 
 /**
  * AI 用量面板。
@@ -81,6 +82,8 @@ export function AiUsage({
   const [models, setModels] = useState<AiModelRecord[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 查询失败（重签后仍失败）的应用：显式列出来，不再无声消失。 */
+  const [failedApps, setFailedApps] = useState<string[]>([]);
   const [aggBy, setAggBy] = useState<'app' | 'model'>('app');
   const [copied, setCopied] = useState(false);
 
@@ -116,6 +119,7 @@ export function AiUsage({
   const load = useCallback(async (): Promise<void> => {
     setBusy(true);
     setError(null);
+    setFailedApps([]);
     try {
       const list = await master.apps.list();
       setApps(list);
@@ -129,28 +133,58 @@ export function AiUsage({
       const keys = await ensureKeys(list);
       const from = new Date(Date.now() - 30 * DAY).toISOString();
 
+      /** 缓存 Key 被吊销后重签的新 Key：跑完统一写回 session，避免闭包里的旧 session 互相覆盖。 */
+      const reissued: Record<string, { id: string; key: string }> = {};
+      const failed: string[] = [];
+
+      const queryUsage = async (apiKey: string): Promise<Omit<AppUsage, 'app'>> => {
+        const api = appApi(session.baseUrl, apiKey);
+        const [byDay, byModel] = await Promise.all([
+          api.ai.usage({ groupBy: 'day', from, detail: '1' }),
+          api.ai.usage({ groupBy: 'model', from }),
+        ]);
+        return {
+          totals: byDay.total,
+          days: byDay.items,
+          models: byModel.items,
+          requests: byDay.requests ?? [],
+        };
+      };
+
       const results = await Promise.all(
         list.map(async (app): Promise<AppUsage | null> => {
-          const api = appApi(session.baseUrl, keys[app.id]!);
           try {
-            const [byDay, byModel] = await Promise.all([
-              api.ai.usage({ groupBy: 'day', from, detail: '1' }),
-              api.ai.usage({ groupBy: 'model', from }),
-            ]);
-            return {
-              app,
-              totals: byDay.total,
-              days: byDay.items,
-              models: byModel.items,
-              requests: byDay.requests ?? [],
-            };
-          } catch {
-            // 单个应用查不到不影响整体：多为该应用的 Key 没 ai:read（老会话 Key）
+            return { app, ...(await queryUsage(keys[app.id]!)) };
+          } catch (e) {
+            // 会话 Key 失效（KEY_REVOKED / KEY_EXPIRED，比如吊销了某应用全部 Key）→ 重签一把再试一次。
+            // 之前这里是无差别静默吞掉 —— bigfish 吊销后整页「统计不了用量」就是这么来的。
+            if (e instanceof ApiError && (e.status === 401 || e.code === 'KEY_EXPIRED')) {
+              try {
+                const fresh = await master.keys.issue({
+                  appId: app.id,
+                  name: 'console-session',
+                  scopes: CONSOLE_SESSION_SCOPES,
+                });
+                reissued[app.id] = { id: fresh.id, key: fresh.key };
+                return { app, ...(await queryUsage(fresh.key)) };
+              } catch (e2) {
+                failed.push(appTitle(app));
+                void e2;
+                return null;
+              }
+            }
+            // 非鉴权类失败（网络 / 服务端 5xx）：不重试，但要显式暴露，不能再无声消失
+            failed.push(appTitle(app));
+            void e;
             return null;
           }
         }),
       );
       setUsages(results.filter((r): r is AppUsage => r !== null));
+      setFailedApps(failed);
+      if (Object.keys(reissued).length > 0) {
+        onSessionChange({ ...session, sessionKeys: { ...session.sessionKeys, ...reissued } });
+      }
 
       // 模型单价表：用任一应用的 Key 读即可（每个 app 看到的目录相同）
       const firstKey = keys[list[0]!.id];
@@ -167,7 +201,7 @@ export function AiUsage({
     } finally {
       setBusy(false);
     }
-  }, [ensureKeys, master, session.baseUrl]);
+  }, [ensureKeys, master, onSessionChange, session.baseUrl, session.sessionKeys]);
 
   // 只在挂载时拉一次；后续由「刷新」按钮显式触发（load 的依赖含 session，随其变化重建）
   useEffect(() => {
@@ -291,6 +325,9 @@ export function AiUsage({
       </div>
 
       {error ? <p className="error">{error}</p> : null}
+      {failedApps.length > 0 ? (
+        <p className="warn">以下应用的用量获取失败（已尝试重签会话 Key）：{failedApps.join('、')}</p>
+      ) : null}
       {apps.length === 0 && !busy ? <p className="muted">还没有应用，先建一个再回来看用量。</p> : null}
 
       {apps.length > 0 ? (

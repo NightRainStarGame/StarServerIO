@@ -86,9 +86,29 @@ async function request<T>(
   const data: unknown = text ? JSON.parse(text) : null;
   if (!res.ok) {
     const err = data as { error?: { code?: string; message?: string } } | null;
-    throw new Error(err?.error?.message ?? `HTTP ${res.status}`);
+    throw new ApiError(err?.error?.message ?? `HTTP ${res.status}`, res.status, err?.error?.code);
   }
   return data as T;
+}
+
+/**
+ * 带 `status` / `code` 的请求错误。
+ *
+ * 之前只抛 `Error(message)`，错误码被丢掉 —— 调用方「想按 KEY_REVOKED 重签会话 Key」
+ * 无从分支。真实案例：内置通道上线时吊销了 bigfish 名下全部 Key，控制台 localStorage
+ * 里缓存的会话 Key 随之全部失效，AI 用量页每个 app 的查询都 401，错误码却被吞掉，
+ * 表现为「统计不了用量」却查不出原因。
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+  }
 }
 
 /** 业务面：带 APIKey。 */
