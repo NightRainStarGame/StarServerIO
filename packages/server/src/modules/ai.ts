@@ -262,15 +262,25 @@ const ChatBody = Type.Object({
       /**
        * content 允许两种形态：
        * - 纯文本（绝大多数请求）
-       * - OpenAI 多模态数组（V4.1 Flash 的图片输入：[{type:'text'},{type:'image_url'}]），
-       *   以及 function calling 第二轮 tool 消息的回传。数组形态不设长度上限 ——
-       *   base64 图片会撑爆任何合理的字符数限制，真正的体量控制靠 bodyLimit。
+       * - OpenAI 多模态数组（V4.1 Flash 的图片输入：[{type:'text'},{type:'image_url'}]）
+       * 数组形态不设长度上限 —— base64 图片会撑爆任何合理的字符数限制，
+       * 真正的体量控制靠 bodyLimit。
        */
       content: Type.Union([
         Type.String({ minLength: 1, maxLength: 100_000 }),
         Type.Array(Type.Any()),
         Type.Null(),
       ]),
+      /**
+       * ⚠️ Fastify 的 AJV 默认 removeAdditional: true —— schema 没声明的字段
+       * 会在校验时被静默剥掉。function calling 第二轮的 tool_calls /
+       * tool_call_id、思考模型的 reasoning_content 回传，必须在 schema 里
+       * 显式放行，否则上游收到残缺消息报 422（且错误信息极具误导性）。
+       */
+      tool_calls: Type.Optional(Type.Array(Type.Any())),
+      tool_call_id: Type.Optional(Type.String({ maxLength: 128 })),
+      reasoning_content: Type.Optional(Type.String({ maxLength: 200_000 })),
+      name: Type.Optional(Type.String({ maxLength: 128 })),
     }),
     { minItems: 1, maxItems: 200 },
   ),
