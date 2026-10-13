@@ -487,12 +487,13 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
       const upstreamBody = {
         model: body.model,
         /**
-         * AJV 的 coerceTypes（'array' 模式）会把 content: null 矫正成空串或空数组
-         * （取决于 Union 分支匹配顺序），而 DeepSeek 的 assistant 工具消息要求
-         * content 为 null —— 收到 ""/[] 会 422。这里统一还原。
+         * AJV 的 coerceTypes（'array' 模式）会把 content: null 双重矫正成
+         * [""]（先 null→""，再 ""→[""]），实测任何按值判断的还原都会被新形态绕过。
+         * 干脆按语义还原：带 tool_calls 的 assistant 消息，content 一律置 null
+         * （OpenAI 规范里它本来就该是 null）；其余消息的原样透传。
          */
         messages: body.messages.map((m) =>
-          m.content == null || m.content === '' || (Array.isArray(m.content) && m.content.length === 0)
+          Array.isArray((m as { tool_calls?: unknown }).tool_calls)
             ? { ...m, content: null }
             : m,
         ),
@@ -505,9 +506,6 @@ export async function registerAi(app: FastifyInstance, opts: ModuleOptions): Pro
         // 关键：没有它 DeepSeek 不会在流末尾附 usage，我们就只能全靠估算
         stream_options: { include_usage: true },
       };
-
-      // TODO(ai-debug): 临时排查 —— 打印发往上游的原始 body 前 900 字符，定位后删除
-      console.log('[ai:debug] upstream body:', JSON.stringify(upstreamBody).slice(0, 900));
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), config.AI_UPSTREAM_TIMEOUT_MS);
